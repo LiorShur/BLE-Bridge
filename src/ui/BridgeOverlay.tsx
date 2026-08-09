@@ -46,8 +46,12 @@ export function BridgeOverlay(): React.ReactElement {
     if (bond.bonded) {
       const loop = Animated.loop(
         Animated.sequence([
-          Animated.timing(pulse, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-          Animated.timing(pulse, { toValue: 0, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+          // useNativeDriver MUST be false here: `strength` also feeds the beam's
+          // width (a layout prop), and a value can't be shared across a native and
+          // a JS driver — that mix is exactly what threw
+          // "Style property 'width' is not supported by native animated module".
+          Animated.timing(pulse, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: false }),
+          Animated.timing(pulse, { toValue: 0, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: false }),
         ]),
       );
       loop.start();
