@@ -30,6 +30,13 @@ export interface EngineTunables {
   toleranceDeg: number;
   formThreshold: number;
   breakThreshold: number;
+  /**
+   * Floor applied to alignment before it multiplies proximity, 0..1. With a
+   * floor, a noisy/averted compass can't zero the bond — proximity leads and
+   * facing is a bonus. 0 = strict spec (raw = proximity·alignment); 0.5 =
+   * proximity-led. Defaults to 0 so the pure engine tests keep the strict rule.
+   */
+  alignFloor?: number;
   /** Optional staleness overrides; default to DEFAULT_BOND_CONFIG when omitted. */
   staleMs?: number;
   decayMs?: number;
@@ -120,13 +127,16 @@ export function ingestObservation(
   const smoothedRssi = smoothRssi(obs.rssi, prev.smoothedRssi, tunables.alpha);
   const distanceM = estimateDistance(smoothedRssi, obs.txPower, tunables.pathLossN);
   const proximity = proximityFromDistance(distanceM, tunables.dNear, tunables.dFar);
-  const alignment = computeAlignment({
+  const rawAlignment = computeAlignment({
     headingA: local.headingDeg,
     headingB: obs.headingDeg,
     accuracyA: local.accuracy,
     accuracyB: obs.headingAccuracy,
     tolerance: tunables.toleranceDeg,
   });
+  // Floor alignment so a jittery/averted compass can't collapse the bond.
+  const floor = tunables.alignFloor ?? 0;
+  const alignment = floor + (1 - floor) * rawAlignment;
 
   const peer: PeerSnapshot = {
     peerId: obs.peerId,

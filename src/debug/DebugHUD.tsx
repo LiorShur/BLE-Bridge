@@ -182,6 +182,7 @@ export function DebugHUD(): React.ReactElement | null {
       <TunableSlider label="D_NEAR (m)" k="dNear" min={0.2} max={2} step={0.1} />
       <TunableSlider label="D_FAR (m)" k="dFar" min={3} max={10} step={0.5} />
       <TunableSlider label="TOLERANCE (°)" k="toleranceDeg" min={20} max={90} step={5} />
+      <TunableSlider label="align floor" k="alignFloor" min={0} max={1} step={0.05} />
       <TunableSlider label="form >" k="formThreshold" min={0.3} max={0.9} step={0.05} />
       <TunableSlider label="break <" k="breakThreshold" min={0.1} max={0.6} step={0.05} />
     </ScrollView>

@@ -60,6 +60,16 @@ describe('ingestObservation', () => {
     expect(toDebugRow(s, 0).alignment).toBe(0); // both facing 0° → not opposed
   });
 
+  it('applies an alignment floor when configured (proximity-led bonding)', () => {
+    const floored = { ...tunables, alignFloor: 0.5 };
+    // Peer turned away → raw alignment 0, but the floor lifts it to 0.5.
+    const away = ingestObservation(initPeerEngine(1), obs({ headingDeg: 0 }), facing, floored);
+    expect(toDebugRow(away, 0).alignment).toBeCloseTo(0.5, 6);
+    // Facing → raw alignment 1 stays 1 regardless of floor.
+    const face = ingestObservation(initPeerEngine(2), obs({ headingDeg: 180 }), facing, floored);
+    expect(toDebugRow(face, 0).alignment).toBeCloseTo(1, 6);
+  });
+
   it('counts packets per second within the window', () => {
     let s = initPeerEngine(1);
     s = ingestObservation(s, obs({ timestamp: 0 }), facing, tunables);

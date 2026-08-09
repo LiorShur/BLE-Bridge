@@ -7,25 +7,37 @@
  * or its permission is unavailable, the overlay still renders on a dark
  * background — the app never dead-ends.
  *
+ * `isActive` is tied to AppState so vision-camera releases the session on
+ * background and REACQUIRES it on resume — without this the preview goes black
+ * after a few background/foreground cycles (field feedback).
+ *
  * NOTE: depends on React Native + react-native-vision-camera; not testable off-device.
  */
-import React, { useEffect } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, AppState, type AppStateStatus } from 'react-native';
 import { Camera, useCameraDevice, useCameraPermission } from 'react-native-vision-camera';
 import { BridgeOverlay } from '../ui/BridgeOverlay';
 
 export function CameraBridge(): React.ReactElement {
   const device = useCameraDevice('back');
   const { hasPermission, requestPermission } = useCameraPermission();
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
 
   useEffect(() => {
     if (!hasPermission) void requestPermission();
   }, [hasPermission, requestPermission]);
 
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s: AppStateStatus) => setAppActive(s === 'active'));
+    return () => sub.remove();
+  }, []);
+
+  const cameraActive = appActive && hasPermission && !!device;
+
   return (
     <View style={styles.fill}>
       {device && hasPermission ? (
-        <Camera style={StyleSheet.absoluteFill} device={device} isActive />
+        <Camera style={StyleSheet.absoluteFill} device={device} isActive={cameraActive} />
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.noCam]}>
           <Text style={styles.noCamText}>{hasPermission ? 'No camera found' : 'Camera permission needed'}</Text>

@@ -26,6 +26,8 @@ export interface Tunables {
   toleranceDeg: number;
   formThreshold: number;
   breakThreshold: number;
+  /** Alignment floor (0..1): proximity-led bonding, facing is a bonus. */
+  alignFloor: number;
   /** Staleness window (ms) before the bridge starts fading. */
   staleMs: number;
   /** Fade duration (ms) once stale. */
@@ -40,8 +42,13 @@ export const DEFAULT_TUNABLES: Tunables = {
   dNear: D_NEAR,
   dFar: D_FAR,
   toleranceDeg: DEFAULT_TOLERANCE,
-  formThreshold: DEFAULT_BOND_CONFIG.formThreshold,
-  breakThreshold: DEFAULT_BOND_CONFIG.breakThreshold,
+  // Looser than the spec's 0.60/0.35 so bonding happens at a comfortable ~1–2 m
+  // and survives movement instead of only at a few cm (field feedback).
+  formThreshold: 0.5,
+  breakThreshold: 0.3,
+  // Proximity-led: a noisy/averted compass can't zero the bond; facing adds up
+  // to the remaining 50%.
+  alignFloor: 0.5,
   // Real-world tolerant staleness (looser than the spec's 2/0.8/5 s) so brief
   // radio gaps and duplicate-suppressing scanners don't collapse the bridge.
   staleMs: 4000,

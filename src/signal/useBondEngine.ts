@@ -36,6 +36,7 @@ function tunablesFromStore(): EngineTunables {
     toleranceDeg: t.toleranceDeg,
     formThreshold: t.formThreshold,
     breakThreshold: t.breakThreshold,
+    alignFloor: t.alignFloor,
     staleMs: t.staleMs,
     decayMs: t.decayMs,
     removeMs: t.removeMs,
