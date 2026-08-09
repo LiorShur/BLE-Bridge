@@ -1,0 +1,16 @@
+{
+  "name": "aurabridge",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Connectionless BLE + AR 'bridge of light' PoC — pure logic core (payload codec + signal processing).",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}
