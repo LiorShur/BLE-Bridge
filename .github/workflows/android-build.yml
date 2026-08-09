@@ -48,8 +48,12 @@ jobs:
       - name: Generate RN 0.74.5 shell
         run: |
           set -eux
-          npx --yes react-native@0.74.5 init AuraBridge \
-            --directory shell --skip-install --skip-git-init --pm npm
+          # Invoke the version-matched CLI DIRECTLY. `npx react-native@0.74.5 init`
+          # re-delegates to the latest CLI, which fails the template copy on Linux.
+          npx --yes @react-native-community/cli@13.6.9 init AuraBridge \
+            --version 0.74.5 --directory shell --skip-install --skip-git-init --pm npm
+          echo "----- shell/android java tree -----"
+          find shell/android/app/src/main/java -type f | sort
 
       - name: Overlay app source onto the shell
         run: |
@@ -73,9 +77,10 @@ jobs:
             react-native-ble-plx@^3.2.1 \
             @react-native-community/slider@^4.5.2 \
             zustand@^4.5.4
-          MA=android/app/src/main/java/com/aurabridge/MainApplication.kt
+          MA=$(find android/app/src/main/java -name MainApplication.kt | head -n1)
+          test -n "$MA"  # fail loudly if the shell didn't generate it
           perl -0pi -e 's/(PackageList\(this\)\.packages\.apply \{)/$1\n            add(com.aurabridge.ble.BleAdvertiserPackage())/' "$MA"
-          echo "----- MainApplication.kt getPackages -----"
+          echo "----- $MA -----"
           grep -n -A3 'packages.apply' "$MA"
 
       - name: Accept Android SDK licenses (best effort)
