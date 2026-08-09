@@ -18,6 +18,12 @@
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
 
+    <!-- Android ≤ 11 (API ≤ 30): BLE scanning delivers results only with location
+         permission granted AND location services on. Not needed on API 31+, where
+         BLUETOOTH_SCAN carries neverForLocation. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="30" />
+
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
     <application

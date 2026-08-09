@@ -30,6 +30,10 @@ export interface EngineTunables {
   toleranceDeg: number;
   formThreshold: number;
   breakThreshold: number;
+  /** Optional staleness overrides; default to DEFAULT_BOND_CONFIG when omitted. */
+  staleMs?: number;
+  decayMs?: number;
+  removeMs?: number;
 }
 
 /** A decoded peer advertisement as the engine consumes it. */
@@ -96,7 +100,14 @@ export function initPeerEngine(peerId: number): PeerEngineState {
 }
 
 function bondConfig(t: EngineTunables) {
-  return { ...DEFAULT_BOND_CONFIG, formThreshold: t.formThreshold, breakThreshold: t.breakThreshold };
+  return {
+    ...DEFAULT_BOND_CONFIG,
+    formThreshold: t.formThreshold,
+    breakThreshold: t.breakThreshold,
+    staleMs: t.staleMs ?? DEFAULT_BOND_CONFIG.staleMs,
+    decayMs: t.decayMs ?? DEFAULT_BOND_CONFIG.decayMs,
+    removeMs: t.removeMs ?? DEFAULT_BOND_CONFIG.removeMs,
+  };
 }
 
 /** Fold a fresh observation into a peer's state. */

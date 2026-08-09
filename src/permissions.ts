@@ -27,9 +27,12 @@ function requiredPermissions(): Permission[] {
       PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
       PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
     );
+  } else {
+    // API 23–30: BLE scan results are ONLY delivered if the app holds location
+    // permission AND location services are ON. Without this the scanner silently
+    // returns nothing — the exact symptom on Android ≤ 11 devices.
+    perms.push(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
   }
-  // API 26–30 scanning required location historically; this PoC targets modern
-  // devices, so no runtime grant is forced there in Stage 1.
   if (AR_ENABLED) perms.push(PermissionsAndroid.PERMISSIONS.CAMERA);
   return perms;
 }

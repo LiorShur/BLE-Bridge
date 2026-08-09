@@ -26,6 +26,12 @@ export interface Tunables {
   toleranceDeg: number;
   formThreshold: number;
   breakThreshold: number;
+  /** Staleness window (ms) before the bridge starts fading. */
+  staleMs: number;
+  /** Fade duration (ms) once stale. */
+  decayMs: number;
+  /** Silence (ms) before the peer is dropped entirely. */
+  removeMs: number;
 }
 
 export const DEFAULT_TUNABLES: Tunables = {
@@ -36,6 +42,11 @@ export const DEFAULT_TUNABLES: Tunables = {
   toleranceDeg: DEFAULT_TOLERANCE,
   formThreshold: DEFAULT_BOND_CONFIG.formThreshold,
   breakThreshold: DEFAULT_BOND_CONFIG.breakThreshold,
+  // Real-world tolerant staleness (looser than the spec's 2/0.8/5 s) so brief
+  // radio gaps and duplicate-suppressing scanners don't collapse the bridge.
+  staleMs: 4000,
+  decayMs: 1500,
+  removeMs: 10000,
 };
 
 export type { PeerDebugRow } from '../signal/engine';
@@ -61,6 +72,9 @@ export interface AppState {
   /** All active peers, strongest first — the multi-peer view the UI renders. */
   bonds: BondState[];
   peerRows: PeerDebugRow[];
+  /** Whether this device is currently advertising, and last advertiser error. */
+  advertising: boolean;
+  advertiserError: string | null;
   hudVisible: boolean;
 
   setCapability: (report: SupportReport) => void;
@@ -70,6 +84,7 @@ export interface AppState {
   setBond: (bond: BondState) => void;
   setBonds: (bonds: BondState[]) => void;
   setPeerRows: (rows: PeerDebugRow[]) => void;
+  setAdvertiserStatus: (advertising: boolean, error: string | null) => void;
   toggleHud: () => void;
 }
 
@@ -91,6 +106,8 @@ export const useStore = create<AppState>((set) => {
     bond: EMPTY_BOND,
     bonds: [],
     peerRows: [],
+    advertising: false,
+    advertiserError: null,
     hudVisible: false,
 
     setCapability: (report) => set({ capability: report }),
@@ -101,6 +118,7 @@ export const useStore = create<AppState>((set) => {
     setBond: (bond) => set({ bond }),
     setBonds: (bonds) => set({ bonds }),
     setPeerRows: (rows) => set({ peerRows: rows }),
+    setAdvertiserStatus: (advertising, error) => set({ advertising, advertiserError: error }),
     toggleHud: () => set((s) => ({ hudVisible: !s.hudVisible })),
   };
 });

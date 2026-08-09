@@ -27,6 +27,7 @@ export function useAdvertiser(enabled: boolean, onError?: (e: AdvertiseError) =>
   const lastHeading = useRef<number | null>(null);
   const lastPublishAt = useRef(0);
   const hasPublished = useRef(false);
+  const inFlight = useRef(false);
 
   useEffect(() => {
     if (!enabled) return;
@@ -49,6 +50,10 @@ export function useAdvertiser(enabled: boolean, onError?: (e: AdvertiseError) =>
     };
 
     const tick = async (now: number): Promise<void> => {
+      // Serialize: never overlap a stop→start cycle with another. Overlapping
+      // republishes were a real source of advertising gaps (bridge flicker).
+      if (inFlight.current) return;
+
       const { localHeadingDeg, localHeadingAccuracy } = useStore.getState();
       const due = shouldRepublish({
         prevHeadingDeg: lastHeading.current,
@@ -58,6 +63,7 @@ export function useAdvertiser(enabled: boolean, onError?: (e: AdvertiseError) =>
       });
       if (!due) return;
 
+      inFlight.current = true;
       sequence.current = (sequence.current + 1) & 0xff;
       const b64 = buildBase64(localHeadingDeg, localHeadingAccuracy);
       try {
@@ -70,8 +76,14 @@ export function useAdvertiser(enabled: boolean, onError?: (e: AdvertiseError) =>
         hasPublished.current = true;
         lastHeading.current = localHeadingDeg;
         lastPublishAt.current = now;
+        useStore.getState().setAdvertiserStatus(true, null);
       } catch (e) {
-        if (e instanceof AdvertiseError) onError?.(e);
+        if (e instanceof AdvertiseError) {
+          useStore.getState().setAdvertiserStatus(false, e.code);
+          onError?.(e);
+        }
+      } finally {
+        inFlight.current = false;
       }
     };
 

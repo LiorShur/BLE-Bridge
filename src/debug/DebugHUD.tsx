@@ -62,6 +62,8 @@ export function DebugHUD(): React.ReactElement | null {
   const localTxPower = useStore((s) => s.localTxPower);
   const headingDeg = useStore((s) => s.localHeadingDeg);
   const headingAccuracy = useStore((s) => s.localHeadingAccuracy);
+  const advertising = useStore((s) => s.advertising);
+  const advertiserError = useStore((s) => s.advertiserError);
   const bond = useStore((s) => s.bond);
   const peers = useNearbyPeers();
 
@@ -74,6 +76,7 @@ export function DebugHUD(): React.ReactElement | null {
       <Row label="txPower" value={`${localTxPower} dBm`} />
       <Row label="heading" value={headingDeg === null ? 'n/a' : `${headingDeg.toFixed(1)}°`} />
       <Row label="hdg acc" value={String(headingAccuracy)} />
+      <Row label="advertising" value={advertising ? 'YES' : advertiserError ? `ERR ${advertiserError}` : 'starting…'} />
 
       <Text style={styles.h}>PRIMARY BOND</Text>
       <Row label="proximity" value={bond.proximity.toFixed(3)} />

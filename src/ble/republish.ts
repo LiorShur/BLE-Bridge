@@ -16,7 +16,12 @@ export interface RepublishConfig {
 
 export const DEFAULT_REPUBLISH_CONFIG: RepublishConfig = {
   headingDeltaDeg: 5,
-  maxIntervalMs: 1000,
+  // Keepalive republish cadence. Each republish is a native stop→start, so we
+  // don't want it too frequent (radio churn / brief gaps), but duplicate-
+  // suppressing scanners only deliver a callback when the payload changes (the
+  // incrementing sequence byte), so it must stay well under the receiver's
+  // staleness window. 1.5 s pairs with a ~4 s stale window (see bond timings).
+  maxIntervalMs: 1500,
 };
 
 export interface RepublishInput {
