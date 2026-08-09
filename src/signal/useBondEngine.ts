@@ -56,9 +56,18 @@ function toEngineObservation(obs: ScanObservation): EngineObservation {
   };
 }
 
+// Scan supervision: some OEMs (notably MIUI/HyperOS) silently stop delivering
+// BLE scan results after a while, even in the foreground. If the result stream
+// goes quiet for this long, restart the scan — but no more often than the
+// cooldown, to stay well under Android's "5 startScan per 30 s" limit.
+const SCAN_SILENCE_MS = 12000;
+const SCAN_RESTART_COOLDOWN_MS = 20000;
+
 export function useBondEngine(enabled: boolean, onScanError?: (e: Error) => void): void {
   const peers = useRef<Map<number, PeerEngineState>>(new Map());
   const scannerRef = useRef<BleScanner | null>(null);
+  const lastObsAt = useRef(0);
+  const lastScanStartAt = useRef(0);
 
   useEffect(() => {
     if (!enabled) return;
@@ -71,14 +80,24 @@ export function useBondEngine(enabled: boolean, onScanError?: (e: Error) => void
       return { headingDeg: s.localHeadingDeg, accuracy: s.localHeadingAccuracy };
     };
 
-    scanner.start(
-      (obs) => {
-        const eo = toEngineObservation(obs);
-        const prev = peers.current.get(eo.peerId) ?? initPeerEngine(eo.peerId);
-        peers.current.set(eo.peerId, ingestObservation(prev, eo, local(), tunablesFromStore()));
-      },
-      (err) => onScanError?.(err),
-    );
+    const onObs = (obs: ScanObservation): void => {
+      lastObsAt.current = obs.timestamp;
+      const eo = toEngineObservation(obs);
+      const prev = peers.current.get(eo.peerId) ?? initPeerEngine(eo.peerId);
+      peers.current.set(eo.peerId, ingestObservation(prev, eo, local(), tunablesFromStore()));
+    };
+    const onErr = (err: Error): void => {
+      // Scan died; the silence check below will restart it after the cooldown.
+      onScanError?.(err);
+    };
+
+    const startScan = (now: number): void => {
+      lastScanStartAt.current = now;
+      lastObsAt.current = now; // grace period before the silence check can fire
+      scanner.start(onObs, onErr);
+    };
+
+    startScan(Date.now());
 
     const publish = (now: number): void => {
       const t = tunablesFromStore();
@@ -92,6 +111,12 @@ export function useBondEngine(enabled: boolean, onScanError?: (e: Error) => void
       store.setBond(selectPrimaryBond(values));
       store.setBonds(selectAllBonds(values));
       store.setPeerRows(values.map((s) => toDebugRow(s, now)));
+
+      // Supervisor: restart a scan that has gone silent (throttle-safe).
+      if (now - lastObsAt.current > SCAN_SILENCE_MS && now - lastScanStartAt.current > SCAN_RESTART_COOLDOWN_MS) {
+        scanner.stop();
+        startScan(now);
+      }
     };
 
     const interval = setInterval(() => publish(Date.now()), TICK_MS);

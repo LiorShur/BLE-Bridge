@@ -9,10 +9,14 @@
  * NOTE: depends on React Native; not testable off-device.
  */
 import React from 'react';
-import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Platform } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { useStore, type Tunables } from '../state/store';
 import { useNearbyPeers } from '../ble/useNearbyPeers';
+
+/** Android device model (Build.MODEL), for calibration bookkeeping. */
+const DEVICE_MODEL: string =
+  Platform.OS === 'android' ? ((Platform.constants as { Model?: string }).Model ?? 'android') : Platform.OS;
 
 function Row({ label, value }: { label: string; value: string }): React.ReactElement {
   return (
@@ -44,6 +48,7 @@ function TunableSlider({
         {label}: {value.toFixed(2)}
       </Text>
       <Slider
+        style={styles.slider}
         minimumValue={min}
         maximumValue={max}
         step={step}
@@ -51,6 +56,34 @@ function TunableSlider({
         onValueChange={(v: number) => setTunable(k, v)}
         minimumTrackTintColor="#7cf9ff"
         maximumTrackTintColor="#334"
+        thumbTintColor="#7cf9ff"
+      />
+    </View>
+  );
+}
+
+/**
+ * Live control of THIS device's advertised txPower (dBm @ 1 m). Because each
+ * device advertises its own reference and peers use it in the distance model,
+ * nudging this equalizes two phones that read the same gap differently
+ * (PAYLOAD_SPEC §3). Raising it makes peers see this device as closer.
+ */
+function TxPowerSlider(): React.ReactElement {
+  const txPower = useStore((s) => s.localTxPower);
+  const setLocalTxPower = useStore((s) => s.setLocalTxPower);
+  return (
+    <View style={styles.sliderRow}>
+      <Text style={styles.sliderLabel}>my txPower (dBm): {txPower}</Text>
+      <Slider
+        style={styles.slider}
+        minimumValue={-80}
+        maximumValue={-40}
+        step={1}
+        value={txPower}
+        onValueChange={(v: number) => setLocalTxPower(Math.round(v))}
+        minimumTrackTintColor="#5ef0a8"
+        maximumTrackTintColor="#334"
+        thumbTintColor="#5ef0a8"
       />
     </View>
   );
@@ -72,6 +105,7 @@ export function DebugHUD(): React.ReactElement | null {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.h}>LOCAL</Text>
+      <Row label="model" value={DEVICE_MODEL} />
       <Row label="peerId" value={`0x${localPeerId.toString(16).padStart(8, '0')}`} />
       <Row label="txPower" value={`${localTxPower} dBm`} />
       <Row label="heading" value={headingDeg === null ? 'n/a' : `${headingDeg.toFixed(1)}°`} />
@@ -100,6 +134,7 @@ export function DebugHUD(): React.ReactElement | null {
       ))}
 
       <Text style={styles.h}>TUNABLES</Text>
+      <TxPowerSlider />
       <TunableSlider label="α (RSSI EMA)" k="alpha" min={0.05} max={0.6} step={0.01} />
       <TunableSlider label="n (path loss)" k="pathLossN" min={1.6} max={3.5} step={0.1} />
       <TunableSlider label="D_NEAR (m)" k="dNear" min={0.2} max={2} step={0.1} />
@@ -130,4 +165,7 @@ const styles = StyleSheet.create({
   peer: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#26324a', marginTop: 6, paddingTop: 6 },
   sliderRow: { marginTop: 6 },
   sliderLabel: { color: '#cdd9e5', fontSize: 11 },
+  // Explicit height — the community Slider collapses to 0 on some older Android
+  // builds (e.g. EMUI) without it, hiding the track.
+  slider: { height: 40, width: '100%' },
 });
