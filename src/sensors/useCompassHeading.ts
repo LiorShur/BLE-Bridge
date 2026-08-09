@@ -1,44 +1,46 @@
 /**
- * REAL compass heading source (Stage 2). Inert until then: nothing imports this
- * and `react-native-compass-heading` is not a Stage-1 dependency, so it is not
- * bundled and cannot affect the Stage-1 build. Excluded from tsconfig.app until
- * the dep is added.
+ * Compass heading source (Stage 2) — reads our native `Heading` module
+ * (android/.../ble/HeadingModule.kt), which surfaces a heading plus an Android
+ * accuracy value (0..3, mirroring SensorManager.SENSOR_STATUS_ACCURACY_*) —
+ * exactly what payload bytes 5/7 need.
  *
- * Uses `react-native-compass-heading`, which surfaces both a heading and an
- * Android accuracy value (0..3, mirroring SensorManager.SENSOR_STATUS_ACCURACY_*)
- * — exactly what payload bytes 5/7 need. When the sensor is unavailable we push
- * `null`, which the encoder maps to the 0xFFFF sentinel and the alignment math
- * treats as the "trust proximity alone" fallback (CLAUDE.md §4.3).
+ * When the sensor is unavailable we push `null`, which the encoder maps to the
+ * 0xFFFF sentinel and the alignment math treats as the "trust proximity alone"
+ * fallback (CLAUDE.md §4.3).
+ *
+ * NOTE: depends on React Native; not part of the pure-logic test suite.
  */
 import { useEffect } from 'react';
-// eslint-disable-next-line import/no-unresolved -- Stage-2 dependency, added later
-import CompassHeading from 'react-native-compass-heading';
+import { NativeModules, NativeEventEmitter } from 'react-native';
 import { useStore } from '../state/store';
 
-const DEGREE_UPDATE_RATE = 1;
+interface NativeHeading {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+}
 
 export function useCompassHeading(): void {
   const setLocalHeading = useStore((s) => s.setLocalHeading);
 
   useEffect(() => {
-    let active = true;
-    try {
-      CompassHeading.start(DEGREE_UPDATE_RATE, ({ heading, accuracy }: { heading: number; accuracy: number }) => {
-        if (!active) return;
-        const norm = ((heading % 360) + 360) % 360;
-        const acc = Math.max(0, Math.min(3, Math.round(accuracy)));
-        setLocalHeading(norm, acc);
-      });
-    } catch {
+    const mod = NativeModules.Heading as NativeHeading | undefined;
+    if (!mod) {
       setLocalHeading(null, 0);
+      return;
     }
+    const emitter = new NativeEventEmitter(NativeModules.Heading);
+    const sub = emitter.addListener('Heading:update', (e: { heading: number; accuracy: number }) => {
+      const norm = ((e.heading % 360) + 360) % 360;
+      const acc = Math.max(0, Math.min(3, Math.round(e.accuracy)));
+      setLocalHeading(norm, acc);
+    });
+    mod.start().catch(() => setLocalHeading(null, 0));
+
     return () => {
-      active = false;
-      try {
-        CompassHeading.stop();
-      } catch {
+      sub.remove();
+      mod.stop().catch(() => {
         /* no-op */
-      }
+      });
     };
   }, [setLocalHeading]);
 }

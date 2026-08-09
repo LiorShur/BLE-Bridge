@@ -35,9 +35,9 @@ function Check({ ok, label, detail }: { ok: boolean; label: string; detail?: str
 
 export function CapabilityScreen({ support, arCore, compassPresent, onContinue }: CapabilityScreenProps): React.ReactElement {
   const advertisingBlocked = !support.advertisingSupported;
-  // Stage 1 gates on BLE support only; ARCore/compass are checked when provided.
-  const allGo =
-    support.supported && (arCore ? arCore.available : true) && (compassPresent === undefined || compassPresent);
+  // Gate on BLE + ARCore. Compass is informational: if it's missing/uncalibrated
+  // the alignment math falls back to proximity (CLAUDE.md §4.3), so don't block.
+  const allGo = support.supported && (arCore ? arCore.available : true);
 
   return (
     <MessageScreen

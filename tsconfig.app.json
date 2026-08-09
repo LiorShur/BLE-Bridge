@@ -9,12 +9,5 @@
     "noEmit": true
   },
   "include": ["src", "index.js"],
-  "//exclude": "Stage-2 files import deps not installed in Stage 1 (Viro, compass). Re-include them when flipping config.AR_ENABLED / HEADING_ENABLED.",
-  "exclude": [
-    "node_modules",
-    "**/*.test.ts",
-    "**/*.test.tsx",
-    "src/ar/BridgeScene.tsx",
-    "src/sensors/useCompassHeading.ts"
-  ]
+  "exclude": ["node_modules", "**/*.test.ts", "**/*.test.tsx"]
 }

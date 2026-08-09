@@ -1,4 +1,4 @@
-name: Android APK (Stage 1)
+name: Android APK (Stage 2 AR)
 
 # Builds a standalone, sideloadable AuraBridge APK (debug-keystore-signed release
 # build, JS bundled — runs without a Metro server).
@@ -75,7 +75,11 @@ jobs:
           npm install
           npm install --save \
             react-native-ble-plx@^3.2.1 \
-            zustand@^4.5.4
+            zustand@^4.5.4 \
+            @reactvision/react-viro@^2.43.0
+          # ARCore/Viro require minSdk 24 (RN 0.74 template defaults to 23).
+          perl -0pi -e 's/minSdkVersion = 23/minSdkVersion = 24/' android/build.gradle
+          echo "----- minSdk -----"; grep -n minSdkVersion android/build.gradle
           MA=$(find android/app/src/main/java -name MainApplication.kt | head -n1)
           test -n "$MA"  # fail loudly if the shell didn't generate it
           perl -0pi -e 's/(PackageList\(this\)\.packages\.apply \{)/$1\n            add(com.aurabridge.ble.BleAdvertiserPackage())/' "$MA"
@@ -102,6 +106,6 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: aurabridge-stage1-apk
+          name: aurabridge-stage2-apk
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error

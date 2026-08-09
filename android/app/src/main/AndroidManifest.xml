@@ -1,9 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Stage 1: BLE only. Camera + ARCore are added in Stage 2 (see BUILD.md). -->
-
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Stage 2: camera for the AR view. -->
+    <uses-permission android:name="android.permission.CAMERA" />
 
     <!-- BLE scan. neverForLocation stops the system forcing a location grant
          (CLAUDE.md §6). We do not derive location from BLE. -->
@@ -25,6 +26,9 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="30" />
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+    <uses-feature android:name="android.hardware.camera" android:required="true" />
+    <!-- ARCore optional so non-AR devices can still install; checked at runtime. -->
+    <uses-feature android:name="android.hardware.camera.ar" android:required="false" />
 
     <application
         android:name=".MainApplication"
@@ -34,6 +38,9 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
+
+        <!-- ARCore installed on demand; "optional" allows non-AR devices. -->
+        <meta-data android:name="com.google.ar.core" android:value="optional" />
 
         <activity
             android:name=".MainActivity"

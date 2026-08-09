@@ -1,15 +1,13 @@
 /**
  * Build-stage feature flags.
  *
- * Stage 1 (this build): reliable, Viro-free APK. BLE discovery + signal engine +
- * a 2D on-screen bridge visualization + HUD, multi-peer. No camera/AR, and no
- * compass dependency — heading is absent, so alignment falls back to 1 and bonds
- * form on proximity (CLAUDE.md §4.3). This is the fast, buildable milestone that
- * proves discovery on real phones.
+ * Stage 2 (current): AR camera bridge via Viro + native compass "face each
+ * other" gate. Adds the @reactvision/react-viro dependency and the native
+ * Heading module; App renders the ViroAR scene and uses the compass.
  *
- * Stage 2: flip AR_ENABLED and HEADING_ENABLED on, add the Viro + compass deps,
- * and the app swaps the 2D view for the ViroAR bridge and the real "face each
- * other" gate. See BUILD.md.
+ * Stage 1 (validated): Viro-free APK — BLE discovery + signal engine + 2D
+ * on-screen bridge + HUD, multi-peer, proximity-only. Flip both flags off and
+ * drop the Viro dep to rebuild it (BridgeView2D is retained for that path).
  */
-export const AR_ENABLED = false;
-export const HEADING_ENABLED = false;
+export const AR_ENABLED = true;
+export const HEADING_ENABLED = true;
