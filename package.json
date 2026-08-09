@@ -11,8 +11,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:app": "tsc -p tsconfig.app.json --noEmit"
   },
-  "//deps": "Stage 1 (buildable now): ble-plx, zustand. The debug HUD slider is pure-JS (no native slider dep). Stage 2 adds @reactvision/react-viro + react-native-compass-heading — see src/config.ts and BUILD.md.",
+  "//deps": "@reactvision/react-viro is PINNED to 2.41.6 — the last version whose react-native peer is '*' (2.42+ require RN 0.76+). The compass is a native module (no JS dep). The HUD slider is pure-JS.",
   "dependencies": {
+    "@reactvision/react-viro": "2.41.6",
     "react": "18.2.0",
     "react-native": "0.74.5",
     "react-native-ble-plx": "^3.2.1",
