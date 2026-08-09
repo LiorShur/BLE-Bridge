@@ -2,15 +2,34 @@
   "name": "aurabridge",
   "version": "0.0.1",
   "private": true,
-  "description": "Connectionless BLE + AR 'bridge of light' PoC — pure logic core (payload codec + signal processing).",
-  "type": "module",
+  "description": "Connectionless BLE + AR 'bridge of light' PoC (Android). Pure-logic core is unit-tested; RN/native/AR layers build on a device toolchain.",
   "scripts": {
+    "start": "react-native start",
+    "android": "react-native run-android",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:app": "tsc -p tsconfig.app.json --noEmit"
+  },
+  "dependencies": {
+    "@react-native-community/slider": "^4.5.2",
+    "@reactvision/react-viro": "^2.41.0",
+    "react": "18.2.0",
+    "react-native": "0.74.5",
+    "react-native-ble-plx": "^3.2.1",
+    "react-native-compass-heading": "^1.6.0",
+    "zustand": "^4.5.4"
   },
   "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@react-native/babel-preset": "0.74.87",
+    "@react-native/metro-config": "0.74.87",
+    "@react-native/typescript-config": "0.74.87",
+    "@types/react": "^18.2.6",
     "typescript": "^5.5.4",
     "vitest": "^2.0.5"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }

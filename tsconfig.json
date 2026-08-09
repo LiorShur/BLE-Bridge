@@ -1,4 +1,5 @@
 {
+  "//": "CORE config: the pure, off-device-testable logic. `npm run typecheck` runs this and stays green without React Native installed. The RN/native/AR files are checked by tsconfig.app.json on a device toolchain.",
   "compilerOptions": {
     "target": "ES2020",
     "module": "ESNext",
@@ -16,5 +17,18 @@
     "resolveJsonModule": true,
     "noEmit": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": [
+    "node_modules",
+    "**/*.tsx",
+    "src/ble/advertiser.ts",
+    "src/ble/scanner.ts",
+    "src/ble/useNearbyPeers.ts",
+    "src/ble/useAdvertiser.ts",
+    "src/sensors",
+    "src/signal/useBondEngine.ts",
+    "src/state",
+    "src/permissions.ts",
+    "src/ar/arcore.ts"
+  ]
 }
