@@ -170,9 +170,12 @@ class BleAdvertiserModule(private val reactContext: ReactApplicationContext) :
 
   // ---- Internals ----------------------------------------------------------
 
-  private fun beginAdvertising(payloadBase64: String, promise: Promise) {
+  // `promise` is nullable so lifecycle-triggered restarts (onHostResume) can reuse
+  // this path without fabricating a Promise instance — avoids hand-implementing the
+  // whole Promise interface (whose exact signatures vary across RN versions).
+  private fun beginAdvertising(payloadBase64: String, promise: Promise?) {
     if (!hasAdvertisePermission()) {
-      promise.reject("PERMISSION_DENIED", "BLUETOOTH_ADVERTISE not granted.")
+      promise?.reject("PERMISSION_DENIED", "BLUETOOTH_ADVERTISE not granted.")
       return
     }
 
@@ -180,28 +183,28 @@ class BleAdvertiserModule(private val reactContext: ReactApplicationContext) :
         try {
           Base64.decode(payloadBase64, Base64.NO_WRAP)
         } catch (e: IllegalArgumentException) {
-          promise.reject("INVALID_BASE64", "Payload string failed to decode.")
+          promise?.reject("INVALID_BASE64", "Payload string failed to decode.")
           return
         }
 
     if (bytes.size > MAX_PAYLOAD_BYTES) {
       // Catch before the platform call to return the specific code, not DATA_TOO_LARGE.
-      promise.reject("PAYLOAD_TOO_LARGE", "Payload is ${bytes.size} bytes; max $MAX_PAYLOAD_BYTES.")
+      promise?.reject("PAYLOAD_TOO_LARGE", "Payload is ${bytes.size} bytes; max $MAX_PAYLOAD_BYTES.")
       return
     }
 
     val adapter = getAdapter()
     if (adapter == null) {
-      promise.reject("BLUETOOTH_UNAVAILABLE", "No Bluetooth adapter.")
+      promise?.reject("BLUETOOTH_UNAVAILABLE", "No Bluetooth adapter.")
       return
     }
     if (!adapter.isEnabled) {
-      promise.reject("BLUETOOTH_DISABLED", "Bluetooth is switched off.")
+      promise?.reject("BLUETOOTH_DISABLED", "Bluetooth is switched off.")
       return
     }
     val advertiser = adapter.bluetoothLeAdvertiser
     if (advertiser == null) {
-      promise.reject("FEATURE_UNSUPPORTED", "This device cannot advertise over BLE.")
+      promise?.reject("FEATURE_UNSUPPORTED", "This device cannot advertise over BLE.")
       return
     }
 
@@ -224,14 +227,13 @@ class BleAdvertiserModule(private val reactContext: ReactApplicationContext) :
       lastPayload = bytes
       lastPublishAtMs = System.currentTimeMillis()
       advertiser.startAdvertising(settings, data, advertiseCallback)
-      // Resolve only after onStartSuccess is emitted as an event; the JS wrapper
-      // waits on the 'started' event. We resolve the promise optimistically here
-      // for the call itself, but success/failure is authoritative via events.
-      promise.resolve(null)
+      // Resolve the call promise now; authoritative success/failure is delivered
+      // via the started/failed events, which the JS wrapper waits on.
+      promise?.resolve(null)
     } catch (e: SecurityException) {
-      promise.reject("PERMISSION_DENIED", "BLUETOOTH_ADVERTISE not granted.")
+      promise?.reject("PERMISSION_DENIED", "BLUETOOTH_ADVERTISE not granted.")
     } catch (e: Exception) {
-      promise.reject("INTERNAL_ERROR", e.message ?: "Advertise start failed.")
+      promise?.reject("INTERNAL_ERROR", e.message ?: "Advertise start failed.")
     }
   }
 
@@ -302,7 +304,7 @@ class BleAdvertiserModule(private val reactContext: ReactApplicationContext) :
     UiThreadUtil.runOnUiThread {
       val payload = lastPayload
       if (wasActiveBeforePause && payload != null && !isAdvertising) {
-        beginAdvertising(Base64.encodeToString(payload, Base64.NO_WRAP), NoopPromise)
+        beginAdvertising(Base64.encodeToString(payload, Base64.NO_WRAP), null)
       }
       wasActiveBeforePause = false
     }
@@ -316,25 +318,5 @@ class BleAdvertiserModule(private val reactContext: ReactApplicationContext) :
       }
       lastPayload = null
     }
-  }
-
-  /** A promise sink for internally-triggered lifecycle restarts. */
-  private object NoopPromise : Promise {
-    override fun resolve(value: Any?) {}
-    override fun reject(code: String, message: String?) {}
-    override fun reject(code: String, throwable: Throwable?) {}
-    override fun reject(code: String, message: String?, throwable: Throwable?) {}
-    override fun reject(throwable: Throwable) {}
-    override fun reject(throwable: Throwable, userInfo: com.facebook.react.bridge.WritableMap) {}
-    override fun reject(code: String, userInfo: com.facebook.react.bridge.WritableMap) {}
-    override fun reject(code: String, throwable: Throwable?, userInfo: com.facebook.react.bridge.WritableMap) {}
-    override fun reject(code: String, message: String?, userInfo: com.facebook.react.bridge.WritableMap) {}
-    override fun reject(
-        code: String,
-        message: String?,
-        throwable: Throwable?,
-        userInfo: com.facebook.react.bridge.WritableMap
-    ) {}
-    override fun reject(message: String) {}
   }
 }
