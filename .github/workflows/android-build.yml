@@ -1,4 +1,4 @@
-name: Android APK (Stage 2 AR)
+name: Android APK (Camera bridge)
 
 # Builds a standalone, sideloadable AuraBridge APK (debug-keystore-signed release
 # build, JS bundled — runs without a Metro server).
@@ -76,10 +76,11 @@ jobs:
           npm install --save \
             react-native-ble-plx@^3.2.1 \
             zustand@^4.5.4 \
-            @reactvision/react-viro@2.41.6
-          # ARCore/Viro require minSdk 24 (RN 0.74 template defaults to 23).
-          perl -0pi -e 's/minSdkVersion = 23/minSdkVersion = 24/' android/build.gradle
-          echo "----- minSdk -----"; grep -n minSdkVersion android/build.gradle
+            react-native-vision-camera@4.5.3
+          # vision-camera needs minSdk 26 (also the project's floor) and Kotlin 1.9+.
+          perl -0pi -e 's/minSdkVersion = 23/minSdkVersion = 26/' android/build.gradle
+          perl -0pi -e 's/kotlinVersion = "[^"]*"/kotlinVersion = "1.9.24"/' android/build.gradle
+          echo "----- versions -----"; grep -nE 'minSdkVersion|kotlinVersion' android/build.gradle
           MA=$(find android/app/src/main/java -name MainApplication.kt | head -n1)
           test -n "$MA"  # fail loudly if the shell didn't generate it
           perl -0pi -e 's/(PackageList\(this\)\.packages\.apply \{)/$1\n            add(com.aurabridge.ble.BleAdvertiserPackage())/' "$MA"

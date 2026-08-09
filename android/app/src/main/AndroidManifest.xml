@@ -27,8 +27,6 @@
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
     <uses-feature android:name="android.hardware.camera" android:required="true" />
-    <!-- ARCore optional so non-AR devices can still install; checked at runtime. -->
-    <uses-feature android:name="android.hardware.camera.ar" android:required="false" />
 
     <application
         android:name=".MainApplication"
@@ -38,9 +36,6 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
-
-        <!-- ARCore installed on demand; "optional" allows non-AR devices. -->
-        <meta-data android:name="com.google.ar.core" android:value="optional" />
 
         <activity
             android:name=".MainActivity"

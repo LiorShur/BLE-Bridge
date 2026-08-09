@@ -14,15 +14,13 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
-import { ViroARSceneNavigator } from '@reactvision/react-viro';
-import { BridgeScene } from './ar/BridgeScene';
+import { CameraBridge } from './ar/CameraBridge';
 import { DebugHUD } from './debug/DebugHUD';
 import { MessageScreen } from './screens/MessageScreen';
 import { CapabilityScreen } from './screens/CapabilityScreen';
 import { OnboardingScreen } from './screens/OnboardingScreen';
 import { requestAllPermissions } from './permissions';
 import { isSupported, type SupportReport } from './ble/advertiser';
-import { checkArCore, type ArCoreReport } from './ar/arcore';
 import { useStore } from './state/store';
 import { useCompassHeading } from './sensors/useCompassHeading';
 import { useAdvertiser } from './ble/useAdvertiser';
@@ -40,7 +38,7 @@ function MainExperience(): React.ReactElement {
 
   return (
     <View style={styles.fill}>
-      <ViroARSceneNavigator autofocus initialScene={{ scene: BridgeScene }} style={styles.fill} />
+      <CameraBridge />
       <DebugHUD />
       {/* Hidden HUD toggle (P4-6): long-press the top-right corner. */}
       <Pressable style={styles.hudTap} onLongPress={toggleHud} delayLongPress={600} />
@@ -51,7 +49,6 @@ function MainExperience(): React.ReactElement {
 export default function App(): React.ReactElement {
   const [phase, setPhase] = useState<Phase>('checking');
   const [support, setSupport] = useState<SupportReport | null>(null);
-  const [arCore, setArCore] = useState<ArCoreReport>({ available: false });
   const setCapability = useStore((s) => s.setCapability);
   const headingDeg = useStore((s) => s.localHeadingDeg);
   const headingAccuracy = useStore((s) => s.localHeadingAccuracy);
@@ -64,9 +61,8 @@ export default function App(): React.ReactElement {
       setPhase('permsDenied');
       return;
     }
-    const [report, ar] = await Promise.all([isSupported(), checkArCore()]);
+    const report = await isSupported();
     setSupport(report);
-    setArCore(ar);
     setCapability(report);
     setPhase('capability');
   }, [setCapability]);
@@ -95,12 +91,7 @@ export default function App(): React.ReactElement {
 
     case 'capability':
       return support ? (
-        <CapabilityScreen
-          support={support}
-          arCore={arCore}
-          compassPresent={compassPresent}
-          onContinue={() => setPhase('onboarding')}
-        />
+        <CapabilityScreen support={support} compassPresent={compassPresent} onContinue={() => setPhase('onboarding')} />
       ) : (
         <MessageScreen title="Starting up" body="Checking hardware…" />
       );
