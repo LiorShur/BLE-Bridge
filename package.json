@@ -11,9 +11,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:app": "tsc -p tsconfig.app.json --noEmit"
   },
-  "//deps": "Stage 1 (buildable now): ble-plx, slider, zustand. Stage 2 adds @reactvision/react-viro + react-native-compass-heading — see src/config.ts and BUILD.md.",
+  "//deps": "Stage 1 (buildable now): ble-plx, zustand. The debug HUD slider is pure-JS (no native slider dep). Stage 2 adds @reactvision/react-viro + react-native-compass-heading — see src/config.ts and BUILD.md.",
   "dependencies": {
-    "@react-native-community/slider": "^4.5.2",
     "react": "18.2.0",
     "react-native": "0.74.5",
     "react-native-ble-plx": "^3.2.1",

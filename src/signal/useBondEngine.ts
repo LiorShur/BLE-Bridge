@@ -68,6 +68,7 @@ export function useBondEngine(enabled: boolean, onScanError?: (e: Error) => void
   const scannerRef = useRef<BleScanner | null>(null);
   const lastObsAt = useRef(0);
   const lastScanStartAt = useRef(0);
+  const scanErrorRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
@@ -82,12 +83,22 @@ export function useBondEngine(enabled: boolean, onScanError?: (e: Error) => void
 
     const onObs = (obs: ScanObservation): void => {
       lastObsAt.current = obs.timestamp;
+      if (scanErrorRef.current !== null) {
+        scanErrorRef.current = null;
+        useStore.getState().setScanError(null); // results flowing again
+      }
       const eo = toEngineObservation(obs);
       const prev = peers.current.get(eo.peerId) ?? initPeerEngine(eo.peerId);
       peers.current.set(eo.peerId, ingestObservation(prev, eo, local(), tunablesFromStore()));
     };
     const onErr = (err: Error): void => {
-      // Scan died; the silence check below will restart it after the cooldown.
+      // Surface the reason (ble-plx reports e.g. location-services-disabled) and
+      // let the silence check below restart the scan after the cooldown.
+      const msg = err.message || 'scan error';
+      if (scanErrorRef.current !== msg) {
+        scanErrorRef.current = msg;
+        useStore.getState().setScanError(msg);
+      }
       onScanError?.(err);
     };
 

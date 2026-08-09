@@ -2,15 +2,17 @@
  * Debug HUD (TASKS.md P1-9, P2-8). A first-class feature, not scaffolding —
  * it is the only way to diagnose radio behaviour (CLAUDE.md §7).
  *
- * Shows the local identity/heading, every discovered peer's full signal chain,
- * and live sliders for the tunable constants so they can be tuned on-device
- * without a rebuild. Behind a hidden gesture in production (P4-6).
+ * Shows the local identity/heading, advertiser + scan status, every discovered
+ * peer's full signal chain, and live sliders for the tunable constants so they
+ * can be tuned on-device. Behind a hidden gesture in production (P4-6).
+ *
+ * Sliders are a tiny pure-JS control (Views + PanResponder), NOT the community
+ * native Slider, which rendered unreliably (0-width) on some EMUI builds.
  *
  * NOTE: depends on React Native; not testable off-device.
  */
-import React from 'react';
-import { View, Text, ScrollView, StyleSheet, Platform } from 'react-native';
-import Slider from '@react-native-community/slider';
+import React, { useRef } from 'react';
+import { View, Text, ScrollView, StyleSheet, Platform, PanResponder, type GestureResponderEvent } from 'react-native';
 import { useStore, type Tunables } from '../state/store';
 import { useNearbyPeers } from '../ble/useNearbyPeers';
 
@@ -23,6 +25,64 @@ function Row({ label, value }: { label: string; value: string }): React.ReactEle
     <View style={styles.row}>
       <Text style={styles.key}>{label}</Text>
       <Text style={styles.val}>{value}</Text>
+    </View>
+  );
+}
+
+/**
+ * Minimal, dependency-free slider: a track + fill + knob driven by touches via
+ * PanResponder. Renders identically on every Android build (the whole reason it
+ * exists — the native community Slider did not).
+ */
+function MiniSlider({
+  value,
+  min,
+  max,
+  step,
+  onChange,
+  color,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+  color: string;
+}): React.ReactElement {
+  const widthRef = useRef(1);
+
+  const apply = (x: number): void => {
+    const w = widthRef.current || 1;
+    let f = x / w;
+    f = f < 0 ? 0 : f > 1 ? 1 : f;
+    let v = min + f * (max - min);
+    v = Math.round(v / step) * step;
+    v = v < min ? min : v > max ? max : v;
+    onChange(v);
+  };
+
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (e: GestureResponderEvent) => apply(e.nativeEvent.locationX),
+      onPanResponderMove: (e: GestureResponderEvent) => apply(e.nativeEvent.locationX),
+    }),
+  ).current;
+
+  const frac = Math.max(0, Math.min(1, (value - min) / (max - min)));
+
+  return (
+    <View
+      style={styles.track}
+      onLayout={(e) => {
+        widthRef.current = e.nativeEvent.layout.width;
+      }}
+      {...pan.panHandlers}
+    >
+      <View style={styles.trackBar} />
+      <View style={[styles.trackFill, { width: `${frac * 100}%`, backgroundColor: color }]} />
+      <View style={[styles.knob, { left: `${frac * 100}%`, backgroundColor: color }]} />
     </View>
   );
 }
@@ -47,17 +107,7 @@ function TunableSlider({
       <Text style={styles.sliderLabel}>
         {label}: {value.toFixed(2)}
       </Text>
-      <Slider
-        style={styles.slider}
-        minimumValue={min}
-        maximumValue={max}
-        step={step}
-        value={value}
-        onValueChange={(v: number) => setTunable(k, v)}
-        minimumTrackTintColor="#7cf9ff"
-        maximumTrackTintColor="#334"
-        thumbTintColor="#7cf9ff"
-      />
+      <MiniSlider value={value} min={min} max={max} step={step} color="#7cf9ff" onChange={(v) => setTunable(k, v)} />
     </View>
   );
 }
@@ -74,17 +124,7 @@ function TxPowerSlider(): React.ReactElement {
   return (
     <View style={styles.sliderRow}>
       <Text style={styles.sliderLabel}>my txPower (dBm): {txPower}</Text>
-      <Slider
-        style={styles.slider}
-        minimumValue={-80}
-        maximumValue={-40}
-        step={1}
-        value={txPower}
-        onValueChange={(v: number) => setLocalTxPower(Math.round(v))}
-        minimumTrackTintColor="#5ef0a8"
-        maximumTrackTintColor="#334"
-        thumbTintColor="#5ef0a8"
-      />
+      <MiniSlider value={txPower} min={-80} max={-40} step={1} color="#5ef0a8" onChange={(v) => setLocalTxPower(Math.round(v))} />
     </View>
   );
 }
@@ -97,6 +137,7 @@ export function DebugHUD(): React.ReactElement | null {
   const headingAccuracy = useStore((s) => s.localHeadingAccuracy);
   const advertising = useStore((s) => s.advertising);
   const advertiserError = useStore((s) => s.advertiserError);
+  const scanError = useStore((s) => s.scanError);
   const bond = useStore((s) => s.bond);
   const peers = useNearbyPeers();
 
@@ -111,6 +152,7 @@ export function DebugHUD(): React.ReactElement | null {
       <Row label="heading" value={headingDeg === null ? 'n/a' : `${headingDeg.toFixed(1)}°`} />
       <Row label="hdg acc" value={String(headingAccuracy)} />
       <Row label="advertising" value={advertising ? 'YES' : advertiserError ? `ERR ${advertiserError}` : 'starting…'} />
+      <Row label="scan" value={scanError ? `ERR ${scanError}` : peers.length > 0 ? 'ok' : 'no results'} />
 
       <Text style={styles.h}>PRIMARY BOND</Text>
       <Row label="proximity" value={bond.proximity.toFixed(3)} />
@@ -163,9 +205,11 @@ const styles = StyleSheet.create({
   key: { color: '#9fb3c8', fontSize: 11 },
   val: { color: '#e6f1ff', fontSize: 11, fontVariant: ['tabular-nums'] },
   peer: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#26324a', marginTop: 6, paddingTop: 6 },
-  sliderRow: { marginTop: 6 },
-  sliderLabel: { color: '#cdd9e5', fontSize: 11 },
-  // Explicit height — the community Slider collapses to 0 on some older Android
-  // builds (e.g. EMUI) without it, hiding the track.
-  slider: { height: 40, width: '100%' },
+  sliderRow: { marginTop: 10 },
+  sliderLabel: { color: '#cdd9e5', fontSize: 11, marginBottom: 4 },
+  // Pure-JS slider parts.
+  track: { height: 32, justifyContent: 'center' },
+  trackBar: { position: 'absolute', left: 0, right: 0, height: 4, borderRadius: 2, backgroundColor: '#26324a' },
+  trackFill: { position: 'absolute', left: 0, height: 4, borderRadius: 2 },
+  knob: { position: 'absolute', width: 18, height: 18, borderRadius: 9, marginLeft: -9 },
 });

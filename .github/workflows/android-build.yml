@@ -75,7 +75,6 @@ jobs:
           npm install
           npm install --save \
             react-native-ble-plx@^3.2.1 \
-            @react-native-community/slider@^4.5.2 \
             zustand@^4.5.4
           MA=$(find android/app/src/main/java -name MainApplication.kt | head -n1)
           test -n "$MA"  # fail loudly if the shell didn't generate it

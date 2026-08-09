@@ -75,6 +75,8 @@ export interface AppState {
   /** Whether this device is currently advertising, and last advertiser error. */
   advertising: boolean;
   advertiserError: string | null;
+  /** Last BLE scan error (e.g. location services disabled), cleared on results. */
+  scanError: string | null;
   hudVisible: boolean;
 
   setCapability: (report: SupportReport) => void;
@@ -85,6 +87,7 @@ export interface AppState {
   setBonds: (bonds: BondState[]) => void;
   setPeerRows: (rows: PeerDebugRow[]) => void;
   setAdvertiserStatus: (advertising: boolean, error: string | null) => void;
+  setScanError: (error: string | null) => void;
   toggleHud: () => void;
 }
 
@@ -108,6 +111,7 @@ export const useStore = create<AppState>((set) => {
     peerRows: [],
     advertising: false,
     advertiserError: null,
+    scanError: null,
     hudVisible: false,
 
     setCapability: (report) => set({ capability: report }),
@@ -119,6 +123,7 @@ export const useStore = create<AppState>((set) => {
     setBonds: (bonds) => set({ bonds }),
     setPeerRows: (rows) => set({ peerRows: rows }),
     setAdvertiserStatus: (advertising, error) => set({ advertising, advertiserError: error }),
+    setScanError: (error) => set({ scanError: error }),
     toggleHud: () => set((s) => ({ hudVisible: !s.hudVisible })),
   };
 });
