@@ -10,8 +10,8 @@
  * `useBondEngine.ts` is the thin React wrapper that pumps scan results and a
  * timer tick through these functions and writes the store.
  */
-import { smoothRssi, estimateDistance, proximityFromDistance } from './rssi.js';
-import { computeAlignment } from './alignment.js';
+import { smoothRssi, estimateDistance, proximityFromDistance } from './rssi';
+import { computeAlignment } from './alignment';
 import {
   initBondMachine,
   stepBond,
@@ -20,7 +20,7 @@ import {
   type BondMachine,
   type BondState,
   type PeerSnapshot,
-} from './bond.js';
+} from './bond';
 
 export interface EngineTunables {
   alpha: number;
@@ -199,4 +199,21 @@ export function selectPrimaryBond(states: Iterable<PeerEngineState>): BondState 
     }
   }
   return best ? toBondState(best.machine) : { proximity: 0, alignment: 0, strength: 0, bonded: false, peer: null };
+}
+
+/**
+ * Project every active peer to a {@link BondState}, strongest first. This is the
+ * multi-peer view (owner scope change 2026-08-09): the UI renders one bridge per
+ * returned entry. Removed peers (no snapshot) are omitted.
+ */
+export function selectAllBonds(states: Iterable<PeerEngineState>): BondState[] {
+  const active: PeerEngineState[] = [];
+  for (const s of states) {
+    if (s.machine.peer !== null) active.push(s);
+  }
+  active.sort((a, b) => {
+    if (b.machine.strength !== a.machine.strength) return b.machine.strength - a.machine.strength;
+    return b.machine.proximity - a.machine.proximity;
+  });
+  return active.map((s) => toBondState(s.machine));
 }

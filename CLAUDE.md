@@ -25,7 +25,10 @@ Do not build these unless explicitly asked:
 - iOS support (Android only — this removes most of the BLE complexity)
 - GATT connections, pairing, or bonding (see §3.1 — the design is connectionless)
 - Background operation (foreground only; screen on, app open)
-- More than two simultaneous peers (the data model allows N, the UI assumes 1)
+- ~~More than two simultaneous peers (the data model allows N, the UI assumes 1)~~
+  **Scope change (2026-08-09, owner request):** multiple simultaneous peers ARE
+  now in scope. The signal layer already handled N; the UI renders all active
+  bonds. Build order: get two devices solid first, then generalise the visual to N.
 - Accounts, backend, persistence, analytics
 - Cloud Anchors or UWB (these are the documented upgrade path, not the PoC)
 

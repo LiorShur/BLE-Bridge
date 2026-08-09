@@ -9,8 +9,8 @@
  * Kept separate from scanner.ts (which imports React Native) so the framing math
  * can be unit-tested off-device.
  */
-import { base64ToBytes } from './base64.js';
-import { PROTOCOL_VERSION } from './payload.js';
+import { base64ToBytes } from './base64';
+import { PROTOCOL_VERSION } from './payload';
 
 /** Company identifier we advertise under (PAYLOAD_SPEC §1). */
 export const COMPANY_ID = 0xffff;

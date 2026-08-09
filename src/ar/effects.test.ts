@@ -11,7 +11,7 @@ import {
   emissionRateFor,
   emissiveIntensityFor,
   BRIDGE_EFFECT,
-} from './effects.js';
+} from './effects';
 
 describe('scalar helpers', () => {
   it('clamp01 bounds to [0,1]', () => {

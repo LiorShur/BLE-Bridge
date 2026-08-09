@@ -8,14 +8,14 @@
  * NOTE: depends on `zustand`; not part of the pure-logic test suite.
  */
 import { create } from 'zustand';
-import type { BondState } from '../signal/bond.js';
-import type { PeerDebugRow } from '../signal/engine.js';
-import type { SupportReport } from '../ble/advertiser.js';
-import { getSessionPeerId } from '../ble/identity.js';
-import { DEFAULT_ALPHA, DEFAULT_PATH_LOSS_N, D_NEAR, D_FAR } from '../signal/rssi.js';
-import { DEFAULT_TOLERANCE } from '../signal/alignment.js';
-import { DEFAULT_BOND_CONFIG } from '../signal/bond.js';
-import { DEFAULT_TX_POWER } from '../calibration.js';
+import type { BondState } from '../signal/bond';
+import type { PeerDebugRow } from '../signal/engine';
+import type { SupportReport } from '../ble/advertiser';
+import { getSessionPeerId } from '../ble/identity';
+import { DEFAULT_ALPHA, DEFAULT_PATH_LOSS_N, D_NEAR, D_FAR } from '../signal/rssi';
+import { DEFAULT_TOLERANCE } from '../signal/alignment';
+import { DEFAULT_BOND_CONFIG } from '../signal/bond';
+import { DEFAULT_TX_POWER } from '../calibration';
 
 /** On-device tunable constants (HUD sliders, TASKS.md P2-8). */
 export interface Tunables {
@@ -38,7 +38,7 @@ export const DEFAULT_TUNABLES: Tunables = {
   breakThreshold: DEFAULT_BOND_CONFIG.breakThreshold,
 };
 
-export type { PeerDebugRow } from '../signal/engine.js';
+export type { PeerDebugRow } from '../signal/engine';
 
 const EMPTY_BOND: BondState = {
   proximity: 0,
@@ -56,8 +56,10 @@ export interface AppState {
   localHeadingAccuracy: number;
   hue: number;
   tunables: Tunables;
-  /** Primary (strongest) peer projection the AR scene renders. */
+  /** Primary (strongest) peer projection. */
   bond: BondState;
+  /** All active peers, strongest first — the multi-peer view the UI renders. */
+  bonds: BondState[];
   peerRows: PeerDebugRow[];
   hudVisible: boolean;
 
@@ -66,6 +68,7 @@ export interface AppState {
   setLocalHeading: (headingDeg: number | null, accuracy: number) => void;
   setTunable: <K extends keyof Tunables>(key: K, value: Tunables[K]) => void;
   setBond: (bond: BondState) => void;
+  setBonds: (bonds: BondState[]) => void;
   setPeerRows: (rows: PeerDebugRow[]) => void;
   toggleHud: () => void;
 }
@@ -86,6 +89,7 @@ export const useStore = create<AppState>((set) => {
     hue: hueForPeer(localPeerId),
     tunables: DEFAULT_TUNABLES,
     bond: EMPTY_BOND,
+    bonds: [],
     peerRows: [],
     hudVisible: false,
 
@@ -95,6 +99,7 @@ export const useStore = create<AppState>((set) => {
       set({ localHeadingDeg: headingDeg, localHeadingAccuracy: accuracy }),
     setTunable: (key, value) => set((s) => ({ tunables: { ...s.tunables, [key]: value } })),
     setBond: (bond) => set({ bond }),
+    setBonds: (bonds) => set({ bonds }),
     setPeerRows: (rows) => set({ peerRows: rows }),
     toggleHud: () => set((s) => ({ hudVisible: !s.hudVisible })),
   };

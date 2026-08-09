@@ -9,7 +9,7 @@ import {
   PAYLOAD_BYTES,
   USED_BYTES,
   type PayloadFields,
-} from './payload.js';
+} from './payload';
 
 const base: PayloadFields = {
   version: PROTOCOL_VERSION,

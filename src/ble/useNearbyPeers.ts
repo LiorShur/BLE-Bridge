@@ -7,8 +7,8 @@
  *
  * NOTE: depends on React Native; not part of the pure-logic test suite.
  */
-import { useStore } from '../state/store.js';
-import type { PeerDebugRow } from '../signal/engine.js';
+import { useStore } from '../state/store';
+import type { PeerDebugRow } from '../signal/engine';
 
 export function useNearbyPeers(): PeerDebugRow[] {
   return useStore((s) => s.peerRows);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveTxPower, DEFAULT_TX_POWER, TX_POWER_BY_MODEL } from './calibration.js';
+import { resolveTxPower, DEFAULT_TX_POWER, TX_POWER_BY_MODEL } from './calibration';
 
 describe('resolveTxPower', () => {
   it('falls back to the default for an unknown model', () => {

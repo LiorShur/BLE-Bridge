@@ -1,127 +1,109 @@
-# BUILD.md — building and running AuraBridge
+# BUILD.md — building, installing, and testing AuraBridge
 
-This repo contains the **complete application source** (TypeScript + the Kotlin
-native advertiser + the Android manifest), plus a fully unit-tested pure-logic
-core. What it does **not** contain is the generated React Native Android shell
-(Gradle wrapper, `MainActivity`/`MainApplication`, `settings.gradle`, icons),
-because that is produced by the RN toolchain on a dev machine and is
-version-specific. This file is the recipe to assemble a runnable app.
+Two physical Android phones are required to test anything real (BLE has no
+emulator). This project ships in two stages so you get a working, installable app
+fast, then add the AR magic.
 
-> Nothing in this project can be validated in an emulator — no BLE radio, no
-> ARCore, no compass. You need **two physical Android devices** (API 26+, both
-> able to advertise — see the capability screen). See CLAUDE.md §8.
+| Stage | What you get | Deps | Build reliability |
+|---|---|---|---|
+| **1 (now)** | BLE discovery + signal engine + **multi-peer 2D bridge** view + HUD. No camera/AR, no compass (bonds form on proximity). | ble-plx, slider, zustand | High — plain RN, builds in CI |
+| **2 (next)** | Swap the 2D view for the **ViroAR** camera bridge; add compass "face each other" gate. | + Viro + compass-heading | Viro linking is the finicky part |
 
----
-
-## 0. What's already done and verified
-
-- `npm test` → the pure core (payload codec, base64, republish policy, identity,
-  RSSI/distance/proximity, alignment, bond hysteresis + staleness, per-peer
-  fusion engine, effect math) is unit-tested. **106 tests, all passing.**
-- `npm run typecheck` → the core typechecks under `tsconfig.json` (strict).
-
-These run with only `typescript` + `vitest` installed and need no device.
+The stage is controlled by `src/config.ts` (`AR_ENABLED`, `HEADING_ENABLED`).
 
 ---
 
-## 1. Generate the RN shell
+## Getting the Stage 1 APK (no dev tools needed)
 
-Use the same RN version as `package.json` (0.74.5):
+CI builds a **standalone, sideloadable APK** on every push to the working branch
+(`.github/workflows/android-build.yml`). It's a debug-keystore-signed *release*
+build, so the JS is bundled and it runs without a Metro server.
+
+1. Open the repo's **Actions** tab → the latest **"Android APK (Stage 1)"** run.
+2. Download the **`aurabridge-stage1-apk`** artifact (a zip) and unzip it.
+3. On each phone: allow installing from your file manager/browser
+   ("Install unknown apps"), then open the APK to install.
+4. Launch on **both** phones, grant Bluetooth when asked, and walk them together —
+   each should show the other as a forming/connected bridge. Long-press the
+   top-right corner to reveal the debug HUD (per-peer RSSI, distance, strength,
+   packet rate, and live tuning sliders).
+
+> The `0xFFFF` company id and the debug keystore make this a **test build only** —
+> not for public distribution.
+
+### What Stage 1 proves on your phones (the hard part)
+
+- Both phones discover each other over connectionless BLE within a few seconds.
+- `peerId` stays stable across the session (MAC randomisation handled — §3.3).
+- Proximity tracks distance; the bridge forms as you approach and fades as you
+  part; multiple people each get their own bridge.
+
+---
+
+## Local build (optional, needs Android Studio / SDK)
+
+The CI job is the source of truth for the exact steps; to reproduce locally:
 
 ```bash
-npx @react-native-community/cli init AuraBridge --version 0.74.5 --directory .rn-shell
+# 1. Generate the RN shell (same version as package.json)
+npx react-native@0.74.5 init AuraBridge --directory shell --skip-install --pm npm
+# 2. Overlay this repo's app code
+cp -R src shell/src && cp index.js app.json babel.config.js metro.config.js shell/
+mkdir -p shell/android/app/src/main/java/com/aurabridge/ble
+cp android/app/src/main/java/com/aurabridge/ble/*.kt shell/android/app/src/main/java/com/aurabridge/ble/
+cp android/app/src/main/AndroidManifest.xml shell/android/app/src/main/AndroidManifest.xml
+# 3. Deps + register the native package
+cd shell && npm install && npm install react-native-ble-plx @react-native-community/slider zustand
+#    then add `add(com.aurabridge.ble.BleAdvertiserPackage())` inside
+#    getPackages() in android/.../com/aurabridge/MainApplication.kt
+# 4. Build + install (device connected)
+npm run android            # or: cd android && ./gradlew assembleRelease
 ```
-
-Then copy the shell's project scaffolding into this repo **without overwriting
-`src/`, `android/app/src/main/AndroidManifest.xml`, or the config files already
-here**:
-
-- `.rn-shell/android/` → `android/` (keep our `AndroidManifest.xml` and the
-  `com/aurabridge/ble/` Kotlin files)
-- `.rn-shell/Gemfile`, `.rn-shell/.watchmanconfig`, etc. as needed
-
-Our `package.json`, `app.json`, `babel.config.js`, `metro.config.js`,
-`index.js`, `tsconfig*.json` are authoritative — keep them.
-
-## 2. Install dependencies
-
-```bash
-npm install
-npm run typecheck:app   # now checks the RN/native/AR layers too
-```
-
-## 3. Register the native advertiser package
-
-In `android/app/src/main/java/com/aurabridge/MainApplication.kt`, add our package
-to the list:
-
-```kotlin
-import com.aurabridge.ble.BleAdvertiserPackage
-
-override fun getPackages(): List<ReactPackage> =
-    PackageList(this).packages.apply {
-      add(BleAdvertiserPackage())
-    }
-```
-
-Confirm `applicationId` is `com.aurabridge` (see `android/app/build.gradle`) and
-`getMainComponentName()` returns `"AuraBridge"` to match `app.json`.
-
-## 4. Viro / ARCore setup
-
-Follow the `@reactvision/react-viro` Android install notes (it links natively to
-ARCore). Ensure `minSdkVersion` ≥ 24 in `android/build.gradle` (we target API 26
-per CLAUDE.md; Viro requires ≥ 24).
-
-## 5. Assets
-
-`src/ar/particle.png` is an **8×8 placeholder glow** committed so the bundler
-resolves. Replace it with a real soft particle sprite before Phase 3 tuning.
-
-## 6. Run
-
-```bash
-npm start                 # Metro
-npm run android           # build + install on a connected device
-```
-
-Repeat on the second device. Grant Bluetooth + Camera when prompted.
 
 ---
 
-## 7. Phase gates (device testing — TASKS.md)
+## Verified without a device
 
-Run these in order; do not skip ahead.
-
-- **P1-6 (before trusting the scanner):** with nRF Connect, confirm the phone
-  advertises manufacturer data under company id `0xFFFF` with the expected bytes,
-  and that it persists for 20 min (catches a stray non-zero timeout).
-- **Gate P1:** each device shows the other in the HUD within 3 s, ≥ 2 packets/s
-  at 2 m, `peerId` stable for a 20-minute session (proves the MAC-randomisation
-  handling), and the peer disappears/reappears cleanly on a walk to 10 m and back.
-- **P2-2 (calibration):** measure RSSI at exactly 1 m per model for 30 s, record
-  in `docs/CALIBRATION.md`, and add the value to `TX_POWER_BY_MODEL` in
-  `src/calibration.ts`.
-- **Gate P2:** at 2 m the HUD distance varies < ±0.5 m over 30 s; turning away
-  drops `alignment` < 0.2 within 1.5 s; `bonded` doesn't flicker at threshold;
-  both devices agree on `bonded` within ~500 ms.
-- **Gate P3:** two people walk together, face, and both see a bridge form; it
-  doesn't strobe and survives a grip shift.
-- **Gate P4:** hand both phones to two newcomers; if they figure it out and
-  react, done.
-
-The HUD (three-finger/corner long-press to toggle) exposes every intermediate
-number and live sliders for α, n, D_NEAR, D_FAR, TOLERANCE, and the bond
-thresholds — tune on-device rather than rebuilding.
+- `npm test` → pure core (payload codec, base64, framing, republish policy,
+  identity, RSSI/distance/proximity, alignment, bond hysteresis + staleness,
+  per-peer fusion incl. multi-peer selection, effect math). **108 tests.**
+- `npm run typecheck` → strict typecheck of that core.
 
 ---
 
-## 8. Known scaffolding placeholders
+## Stage 2 — turning on AR
+
+1. In `src/config.ts` set `AR_ENABLED = true` and `HEADING_ENABLED = true`.
+2. Add deps: `@reactvision/react-viro`, `react-native-compass-heading` (add them
+   to the CI install step and `package.json`).
+3. Point `App.tsx` at the Viro experience (`ar/BridgeScene.tsx`) and
+   `sensors/useCompassHeading.ts`; re-include those in `tsconfig.app.json`.
+4. Restore camera + ARCore entries in `AndroidManifest.xml` (camera permission,
+   `uses-feature android.hardware.camera.ar`, `com.google.ar.core` meta-data).
+5. Follow the `@reactvision/react-viro` Android setup; iterate the CI build.
+
+Do this only after Stage 1 is solid on two devices (CLAUDE.md §9 phase gate).
+
+---
+
+## Phase gates (device testing — TASKS.md)
+
+- **Gate P1:** each device shows the other in the HUD within 3 s, ≥ 2 packets/s at
+  2 m, `peerId` stable for 20 min; peer disappears/reappears cleanly at 10 m.
+- **P2-2 calibration:** measure RSSI at 1 m per model → `docs/CALIBRATION.md` +
+  `TX_POWER_BY_MODEL` in `src/calibration.ts`.
+- **Gate P2:** distance varies < ±0.5 m over 30 s at 2 m; `bonded` doesn't
+  flicker at threshold; both devices agree within ~500 ms.
+- **Gate P3/P4 (Stage 2):** two people face each other and both see a bridge form;
+  it doesn't strobe; hand it to newcomers and watch.
+
+---
+
+## Known placeholders
 
 | Item | Status |
 |---|---|
-| `src/ar/arcore.ts` | Returns "assumed available on Android". Bridge `ArCoreApk.checkAvailability()` for an honest capability report. |
-| `src/ar/particle.png` | 8×8 placeholder sprite. |
-| `react-native-compass-heading` | Chosen over `react-native-sensors` because it yields heading **and** the accuracy value payload byte 7 needs. |
-| `TX_POWER_BY_MODEL` | Empty until on-device calibration (P2-2). Falls back to −59 dBm. |
-| RN shell (Gradle, MainActivity/Application) | Generated per §1, not committed. |
+| RN shell (Gradle, MainActivity/Application, res/) | Generated in CI, not committed. |
+| `src/ar/arcore.ts` | Stub "assumed available"; bridge `ArCoreApk.checkAvailability()` in Stage 2. |
+| `src/ar/particle.png` | 8×8 placeholder sprite (Stage 2 AR). |
+| `TX_POWER_BY_MODEL` | Empty until on-device calibration; falls back to −59 dBm. |

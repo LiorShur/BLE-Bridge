@@ -6,10 +6,11 @@ import {
   toDebugRow,
   isRemoved,
   selectPrimaryBond,
+  selectAllBonds,
   type EngineObservation,
   type EngineTunables,
   type LocalHeading,
-} from './engine.js';
+} from './engine';
 
 const tunables: EngineTunables = {
   alpha: 0.2,
@@ -96,5 +97,22 @@ describe('selectPrimaryBond', () => {
     const weak = ingestObservation(initPeerEngine(2), obs({ peerId: 2, rssi: -85, timestamp: 0 }), facing, tunables);
     const primary = selectPrimaryBond([weak, strong]);
     expect(primary.peer?.peerId).toBe(1);
+  });
+});
+
+describe('selectAllBonds (multi-peer)', () => {
+  it('returns every active peer, strongest first', () => {
+    const strong = ingestObservation(initPeerEngine(1), obs({ peerId: 1, rssi: -55, timestamp: 0 }), facing, tunables);
+    const mid = ingestObservation(initPeerEngine(2), obs({ peerId: 2, rssi: -70, timestamp: 0 }), facing, tunables);
+    const weak = ingestObservation(initPeerEngine(3), obs({ peerId: 3, rssi: -85, timestamp: 0 }), facing, tunables);
+    const bonds = selectAllBonds([mid, weak, strong]);
+    expect(bonds.map((b) => b.peer?.peerId)).toEqual([1, 2, 3]);
+  });
+
+  it('omits removed peers and returns [] when empty', () => {
+    let gone = ingestObservation(initPeerEngine(9), obs({ peerId: 9, timestamp: 0 }), facing, tunables);
+    gone = tickPeer(gone, 5000, tunables); // silence → removed
+    expect(selectAllBonds([gone])).toEqual([]);
+    expect(selectAllBonds([])).toEqual([]);
   });
 });

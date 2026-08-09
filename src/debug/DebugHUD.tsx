@@ -11,8 +11,8 @@
 import React from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import Slider from '@react-native-community/slider';
-import { useStore, type Tunables } from '../state/store.js';
-import { useNearbyPeers } from '../ble/useNearbyPeers.js';
+import { useStore, type Tunables } from '../state/store';
+import { useNearbyPeers } from '../ble/useNearbyPeers';
 
 function Row({ label, value }: { label: string; value: string }): React.ReactElement {
   return (

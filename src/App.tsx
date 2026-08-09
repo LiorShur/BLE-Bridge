@@ -1,28 +1,29 @@
 /**
- * App root: permission gate → capability gate → onboarding → AR experience.
+ * App root: permission gate → capability gate → onboarding → experience.
  *
- * The four signal hooks (heading, advertiser, scan/bond engine) live in
- * <MainExperience> so they mount together, exactly once, only when the device
- * has passed every gate. The AR scene and HUD read the store; nothing here
- * reaches into Bluetooth directly (CLAUDE.md §3.4).
+ * The signal hooks (heading, advertiser, scan/bond engine) live in
+ * <MainExperience> so they mount together, exactly once, only after every gate
+ * passes. The view layer reads the store; nothing here touches Bluetooth
+ * directly (CLAUDE.md §3.4).
  *
- * NOTE: depends on React Native + Viro; not testable off-device.
+ * Stage 1 renders the 2D bridge view (no camera/AR). Stage 2 flips
+ * config.AR_ENABLED and swaps in the ViroAR scene — see src/config.ts / BUILD.md.
+ *
+ * NOTE: depends on React Native; not testable off-device.
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
-import { ViroARSceneNavigator } from '@reactvision/react-viro';
-import { BridgeScene } from './ar/BridgeScene.js';
-import { DebugHUD } from './debug/DebugHUD.js';
-import { MessageScreen } from './screens/MessageScreen.js';
-import { CapabilityScreen } from './screens/CapabilityScreen.js';
-import { OnboardingScreen } from './screens/OnboardingScreen.js';
-import { requestAllPermissions } from './permissions.js';
-import { isSupported, type SupportReport } from './ble/advertiser.js';
-import { checkArCore, type ArCoreReport } from './ar/arcore.js';
-import { useStore } from './state/store.js';
-import { useHeading } from './sensors/useHeading.js';
-import { useAdvertiser } from './ble/useAdvertiser.js';
-import { useBondEngine } from './signal/useBondEngine.js';
+import { BridgeView2D } from './ui/BridgeView2D';
+import { DebugHUD } from './debug/DebugHUD';
+import { MessageScreen } from './screens/MessageScreen';
+import { CapabilityScreen } from './screens/CapabilityScreen';
+import { OnboardingScreen } from './screens/OnboardingScreen';
+import { requestAllPermissions } from './permissions';
+import { isSupported, type SupportReport } from './ble/advertiser';
+import { useStore } from './state/store';
+import { useHeading } from './sensors/useHeading';
+import { useAdvertiser } from './ble/useAdvertiser';
+import { useBondEngine } from './signal/useBondEngine';
 
 type Phase = 'checking' | 'permsDenied' | 'capability' | 'onboarding' | 'ready';
 
@@ -36,10 +37,9 @@ function MainExperience(): React.ReactElement {
 
   return (
     <View style={styles.fill}>
-      <ViroARSceneNavigator autofocus initialScene={{ scene: BridgeScene }} style={styles.fill} />
+      <BridgeView2D />
       <DebugHUD />
-      {/* Hidden HUD toggle (P4-6): long-press the top-right corner. A three-finger
-          gesture is the eventual affordance; this corner target is the placeholder. */}
+      {/* Hidden HUD toggle (P4-6): long-press the top-right corner. */}
       <Pressable style={styles.hudTap} onLongPress={toggleHud} delayLongPress={600} />
     </View>
   );
@@ -48,11 +48,7 @@ function MainExperience(): React.ReactElement {
 export default function App(): React.ReactElement {
   const [phase, setPhase] = useState<Phase>('checking');
   const [support, setSupport] = useState<SupportReport | null>(null);
-  const [arCore, setArCore] = useState<ArCoreReport>({ available: false });
   const setCapability = useStore((s) => s.setCapability);
-  const headingAccuracy = useStore((s) => s.localHeadingAccuracy);
-  const headingDeg = useStore((s) => s.localHeadingDeg);
-  const compassPresent = headingDeg !== null || headingAccuracy > 0;
 
   const runChecks = useCallback(async (): Promise<void> => {
     setPhase('checking');
@@ -61,9 +57,8 @@ export default function App(): React.ReactElement {
       setPhase('permsDenied');
       return;
     }
-    const [report, ar] = await Promise.all([isSupported(), checkArCore()]);
+    const report = await isSupported();
     setSupport(report);
-    setArCore(ar);
     setCapability(report);
     setPhase('capability');
   }, [setCapability]);
@@ -75,7 +70,7 @@ export default function App(): React.ReactElement {
   switch (phase) {
     case 'checking':
       return (
-        <MessageScreen title="Starting up" body="Checking permissions and hardware…">
+        <MessageScreen title="Starting up" body="Checking permissions and Bluetooth…">
           <ActivityIndicator color="#7cf9ff" style={styles.spinner} />
         </MessageScreen>
       );
@@ -84,7 +79,7 @@ export default function App(): React.ReactElement {
       return (
         <MessageScreen
           title="Permissions needed"
-          body="AuraBridge needs Bluetooth and Camera access to find nearby people and draw the bridge. Nothing leaves your device."
+          body="AuraBridge needs Bluetooth access to find nearby people. Nothing leaves your device."
           actionLabel="Grant access"
           onAction={() => void runChecks()}
         />
@@ -92,12 +87,7 @@ export default function App(): React.ReactElement {
 
     case 'capability':
       return support ? (
-        <CapabilityScreen
-          support={support}
-          arCore={arCore}
-          compassPresent={compassPresent}
-          onContinue={() => setPhase('onboarding')}
-        />
+        <CapabilityScreen support={support} onContinue={() => setPhase('onboarding')} />
       ) : (
         <MessageScreen title="Starting up" body="Checking hardware…" />
       );

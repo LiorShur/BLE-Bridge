@@ -9,8 +9,8 @@
  * NOTE: depends on React Native; not part of the pure-logic test suite.
  */
 import { useEffect, useRef } from 'react';
-import { BleScanner, type ScanObservation } from '../ble/scanner.js';
-import { useStore } from '../state/store.js';
+import { BleScanner, type ScanObservation } from '../ble/scanner';
+import { useStore } from '../state/store';
 import {
   initPeerEngine,
   ingestObservation,
@@ -18,10 +18,11 @@ import {
   toDebugRow,
   isRemoved,
   selectPrimaryBond,
+  selectAllBonds,
   type EngineObservation,
   type EngineTunables,
   type PeerEngineState,
-} from './engine.js';
+} from './engine';
 
 const TICK_MS = 100;
 
@@ -84,8 +85,10 @@ export function useBondEngine(enabled: boolean, onScanError?: (e: Error) => void
         else peers.current.set(id, ticked);
       }
       const store = useStore.getState();
-      store.setBond(selectPrimaryBond(peers.current.values()));
-      store.setPeerRows([...peers.current.values()].map((s) => toDebugRow(s, now)));
+      const values = [...peers.current.values()];
+      store.setBond(selectPrimaryBond(values));
+      store.setBonds(selectAllBonds(values));
+      store.setPeerRows(values.map((s) => toDebugRow(s, now)));
     };
 
     const interval = setInterval(() => publish(Date.now()), TICK_MS);

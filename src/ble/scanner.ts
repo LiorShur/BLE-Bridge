@@ -12,8 +12,8 @@
  * NOTE: depends on React Native + native BLE; not in the pure-logic test suite.
  */
 import { BleManager, ScanMode, type Device } from 'react-native-ble-plx';
-import { extractPayloadBytes } from './manufacturer.js';
-import { decodePayload, headingToDegrees, type DecodedPayload } from './payload.js';
+import { extractPayloadBytes } from './manufacturer';
+import { decodePayload, headingToDegrees, type DecodedPayload } from './payload';
 
 /** A decoded, radio-stamped view of one peer advertisement. */
 export interface ScanObservation {

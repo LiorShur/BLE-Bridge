@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { extractPayloadBytes, COMPANY_ID } from './manufacturer.js';
-import { bytesToBase64 } from './base64.js';
-import { encodePayload, PROTOCOL_VERSION } from './payload.js';
+import { extractPayloadBytes, COMPANY_ID } from './manufacturer';
+import { bytesToBase64 } from './base64';
+import { encodePayload, PROTOCOL_VERSION } from './payload';
 
 /** Frame a payload the way ble-plx presents it: LE company id, then bytes. */
 function frame(companyId: number, payload: Uint8Array): string {

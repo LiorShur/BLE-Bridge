@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { generatePeerId, getSessionPeerId, __resetSessionPeerId, PEER_ID_UNSET } from './identity.js';
+import { generatePeerId, getSessionPeerId, __resetSessionPeerId, PEER_ID_UNSET } from './identity';
 
 afterEach(() => __resetSessionPeerId());
 

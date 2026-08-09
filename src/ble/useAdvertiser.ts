@@ -10,11 +10,11 @@
  * NOTE: depends on React Native; not part of the pure-logic test suite.
  */
 import { useEffect, useRef } from 'react';
-import { useStore } from '../state/store.js';
-import { encodePayload, FLAG_AVAILABLE } from './payload.js';
-import { bytesToBase64 } from './base64.js';
-import { shouldRepublish } from './republish.js';
-import { startAdvertising, updatePayload, stopAdvertising, AdvertiseError } from './advertiser.js';
+import { useStore } from '../state/store';
+import { encodePayload, FLAG_AVAILABLE } from './payload';
+import { bytesToBase64 } from './base64';
+import { shouldRepublish } from './republish';
+import { startAdvertising, updatePayload, stopAdvertising, AdvertiseError } from './advertiser';
 
 const POLL_MS = 250;
 

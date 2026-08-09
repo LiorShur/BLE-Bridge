@@ -1,0 +1,99 @@
+name: Android APK (Stage 1)
+
+# Builds a standalone, sideloadable AuraBridge APK (debug-keystore-signed release
+# build, JS bundled — runs without a Metro server).
+#
+# Strategy: this repo holds the app source (src/, our Kotlin native module, our
+# AndroidManifest) but NOT the generated React Native Android shell (Gradle,
+# MainActivity/MainApplication, res/). CI generates a pristine RN 0.74.5 shell,
+# overlays our code, registers the native package, and builds — keeping the
+# version-specific Gradle project canonical instead of hand-authored.
+
+on:
+  push:
+    branches: ['claude/ble-bridge-docs-review-my9euw']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Pure-logic tests (payload codec + signal engine)
+        run: |
+          set -eux
+          npm install
+          npm test
+
+      - name: Generate RN 0.74.5 shell
+        run: |
+          set -eux
+          npx --yes react-native@0.74.5 init AuraBridge \
+            --directory shell --skip-install --skip-git-init --pm npm
+
+      - name: Overlay app source onto the shell
+        run: |
+          set -eux
+          rm -f shell/App.tsx
+          rm -rf shell/__tests__
+          cp -R src shell/src
+          cp index.js app.json babel.config.js metro.config.js shell/
+          mkdir -p shell/android/app/src/main/java/com/aurabridge/ble
+          cp android/app/src/main/java/com/aurabridge/ble/*.kt \
+             shell/android/app/src/main/java/com/aurabridge/ble/
+          cp android/app/src/main/AndroidManifest.xml \
+             shell/android/app/src/main/AndroidManifest.xml
+
+      - name: Install deps + register native package
+        working-directory: shell
+        run: |
+          set -eux
+          npm install
+          npm install --save \
+            react-native-ble-plx@^3.2.1 \
+            @react-native-community/slider@^4.5.2 \
+            zustand@^4.5.4
+          MA=android/app/src/main/java/com/aurabridge/MainApplication.kt
+          perl -0pi -e 's/(PackageList\(this\)\.packages\.apply \{)/$1\n            add(com.aurabridge.ble.BleAdvertiserPackage())/' "$MA"
+          echo "----- MainApplication.kt getPackages -----"
+          grep -n -A3 'packages.apply' "$MA"
+
+      - name: Accept Android SDK licenses (best effort)
+        run: yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+
+      - name: Gradle assembleRelease
+        working-directory: shell/android
+        run: |
+          set -eux
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Locate APK
+        id: apk
+        run: |
+          set -eux
+          APK=$(find shell/android/app/build/outputs/apk/release -name '*.apk' | head -n1)
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurabridge-stage1-apk
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error

@@ -7,7 +7,7 @@ import {
   type BondMachine,
   type BondSample,
   type PeerSnapshot,
-} from './bond.js';
+} from './bond';
 
 const peer: PeerSnapshot = {
   peerId: 0xa3f91c4e,

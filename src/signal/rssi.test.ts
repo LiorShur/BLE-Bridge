@@ -7,7 +7,7 @@ import {
   DEFAULT_PATH_LOSS_N,
   D_NEAR,
   D_FAR,
-} from './rssi.js';
+} from './rssi';
 
 describe('smoothRssi (EMA, dBm domain)', () => {
   it('seeds with the first sample rather than blending toward 0', () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { bytesToBase64, base64ToBytes } from './base64.js';
-import { encodePayload, PROTOCOL_VERSION } from './payload.js';
+import { bytesToBase64, base64ToBytes } from './base64';
+import { encodePayload, PROTOCOL_VERSION } from './payload';
 
 const enc = (s: string): Uint8Array => new Uint8Array([...s].map((c) => c.charCodeAt(0)));
 const dec = (b: Uint8Array): string => String.fromCharCode(...b);

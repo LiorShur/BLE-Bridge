@@ -8,14 +8,16 @@
  */
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import type { SupportReport } from '../ble/advertiser.js';
-import type { ArCoreReport } from '../ar/arcore.js';
-import { MessageScreen } from './MessageScreen.js';
+import type { SupportReport } from '../ble/advertiser';
+import type { ArCoreReport } from '../ar/arcore';
+import { MessageScreen } from './MessageScreen';
 
 export interface CapabilityScreenProps {
   support: SupportReport;
-  arCore: ArCoreReport;
-  compassPresent: boolean;
+  /** Stage 2 only: ARCore availability. Omitted in Stage 1 (no camera/AR). */
+  arCore?: ArCoreReport;
+  /** Stage 2 only: compass presence. Omitted in Stage 1 (proximity-only). */
+  compassPresent?: boolean;
   onContinue?: () => void;
 }
 
@@ -33,7 +35,9 @@ function Check({ ok, label, detail }: { ok: boolean; label: string; detail?: str
 
 export function CapabilityScreen({ support, arCore, compassPresent, onContinue }: CapabilityScreenProps): React.ReactElement {
   const advertisingBlocked = !support.advertisingSupported;
-  const allGo = support.supported && arCore.available && compassPresent;
+  // Stage 1 gates on BLE support only; ARCore/compass are checked when provided.
+  const allGo =
+    support.supported && (arCore ? arCore.available : true) && (compassPresent === undefined || compassPresent);
 
   return (
     <MessageScreen
@@ -56,8 +60,10 @@ export function CapabilityScreen({ support, arCore, compassPresent, onContinue }
           label="BLE advertising supported"
           detail={support.advertisingSupported ? undefined : 'isMultipleAdvertisementSupported = false.'}
         />
-        <Check ok={arCore.available} label="ARCore available" detail={arCore.reason} />
-        <Check ok={compassPresent} label="Compass present" detail={compassPresent ? undefined : 'Effect will run on proximity alone.'} />
+        {arCore ? <Check ok={arCore.available} label="ARCore available" detail={arCore.reason} /> : null}
+        {compassPresent !== undefined ? (
+          <Check ok={compassPresent} label="Compass present" detail={compassPresent ? undefined : 'Effect will run on proximity alone.'} />
+        ) : null}
       </View>
     </MessageScreen>
   );

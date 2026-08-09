@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeAlignment, DEFAULT_TOLERANCE } from './alignment.js';
+import { computeAlignment, DEFAULT_TOLERANCE } from './alignment';
 
 const HIGH = 3; // trusted accuracy
 

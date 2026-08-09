@@ -22,7 +22,7 @@ import {
   ViroNode,
   ViroAmbientLight,
 } from '@reactvision/react-viro';
-import { useStore } from '../state/store.js';
+import { useStore } from '../state/store';
 import {
   BRIDGE_EFFECT,
   EASING,
@@ -30,7 +30,7 @@ import {
   emissiveIntensityFor,
   hueByteToHex,
   smoothTowards,
-} from './effects.js';
+} from './effects';
 
 export interface BridgeSceneProps {
   /** Peer position in scene space. Default: 2 m ahead along −Z (P3-1 seam). */

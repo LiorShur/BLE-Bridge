@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shouldRepublish, angularDeltaDeg, DEFAULT_REPUBLISH_CONFIG } from './republish.js';
+import { shouldRepublish, angularDeltaDeg, DEFAULT_REPUBLISH_CONFIG } from './republish';
 
 const baseInput = {
   prevHeadingDeg: 100 as number | null,
