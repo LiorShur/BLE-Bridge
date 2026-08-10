@@ -19,6 +19,7 @@ import { useStore } from '../state/store';
 import { hueByteToHex } from '../ar/effects';
 import { Sound } from '../audio/sound';
 import { reactionById } from '../reactions';
+import { shortPeerTag } from './peerLabel';
 import type { BondState } from '../signal/bond';
 import type { IncomingReaction } from '../state/store';
 
@@ -31,11 +32,6 @@ function statusLabel(b: BondState | undefined): string {
   if (b.bonded) return 'CONNECTED';
   if (b.strength > 0.3) return 'forming…';
   return 'nearby';
-}
-
-/** Short human-readable tag for a peer id — the last 16 bits as hex. */
-function shortPeerTag(peerId: number): string {
-  return '#' + (peerId & 0xffff).toString(16).toUpperCase().padStart(4, '0');
 }
 
 /** One received reaction floating up from its sender's beam. */
