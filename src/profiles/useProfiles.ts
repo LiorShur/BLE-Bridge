@@ -20,15 +20,23 @@ export function useProfiles(): void {
   useEffect(() => {
     if (!profilesEnabled()) return;
     const { profiles, setProfileEntry } = useStore.getState();
+    const now = Date.now();
+    const RETRY_MISSING_MS = 20000; // re-check a peer who set their name late
     for (const b of bonds) {
       if (!b.bonded || !b.peer) continue;
       const peerId = b.peer.peerId >>> 0;
-      if (profiles[peerId]) continue; // already loading/loaded/missing
-      setProfileEntry(peerId, { status: 'loading' });
+      const existing = profiles[peerId];
+      // Skip if loaded, currently loading, or missing-but-recently-tried.
+      if (existing && !(existing.status === 'missing' && now - (existing.triedAt ?? 0) > RETRY_MISSING_MS)) {
+        continue;
+      }
+      setProfileEntry(peerId, { status: 'loading', triedAt: now });
       void fetchProfile(peerId).then((p) => {
         useStore.getState().setProfileEntry(
           peerId,
-          p ? { status: 'loaded', name: p.name, photoURL: p.photoURL } : { status: 'missing' },
+          p
+            ? { status: 'loaded', name: p.name, photoURL: p.photoURL }
+            : { status: 'missing', triedAt: Date.now() },
         );
       });
     }

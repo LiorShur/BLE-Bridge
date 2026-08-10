@@ -94,6 +94,8 @@ export interface ProfileEntry {
   status: 'loading' | 'loaded' | 'missing';
   name?: string;
   photoURL?: string | null;
+  /** When this lookup was last attempted (ms), so 'missing' can be retried. */
+  triedAt?: number;
 }
 
 export interface AppState {

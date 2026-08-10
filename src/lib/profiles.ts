@@ -16,7 +16,7 @@
  */
 import { initializeApp, type FirebaseApp } from 'firebase/app';
 import {
-  getFirestore,
+  initializeFirestore,
   doc,
   getDoc,
   setDoc,
@@ -47,7 +47,11 @@ function ensureInit(): boolean {
   if (app) return true;
   try {
     app = initializeApp(firebaseConfig);
-    db = getFirestore(app);
+    // React Native's networking doesn't support Firestore's default WebChannel
+    // streaming transport — getDoc/setDoc silently hang/fail. Forcing long
+    // polling is the documented fix for RN and is REQUIRED here (this was why
+    // names weren't appearing). auto-detect is unreliable in RN; force it.
+    db = initializeFirestore(app, { experimentalForceLongPolling: true });
   } catch {
     app = null;
     db = null;

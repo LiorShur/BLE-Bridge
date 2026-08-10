@@ -24,27 +24,30 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
   const [name, setName] = useState(myName ?? '');
   const [photoURL, setPhotoURL] = useState(myPhotoURL ?? '');
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const trimmedPhoto = photoURL.trim();
   const showPreview = /^https?:\/\//i.test(trimmedPhoto);
 
-  const persist = async (): Promise<void> => {
-    const finalName = name.trim();
-    const finalPhoto = trimmedPhoto || null;
-    setMyProfile(finalName || null, finalPhoto);
-    await saveMyProfileLocal({ name: finalName || null, photoURL: finalPhoto });
-    if (finalName) await saveProfile(localPeerId, { name: finalName, photoURL: finalPhoto });
-  };
-
   const onSave = async (): Promise<void> => {
     if (saving) return;
     setSaving(true);
-    try {
-      await persist();
-    } finally {
-      setSaving(false);
-      onDone();
+    setError(null);
+    const finalName = name.trim();
+    const finalPhoto = trimmedPhoto || null;
+    // Local mirror always succeeds; the network write is what can fail.
+    setMyProfile(finalName || null, finalPhoto);
+    await saveMyProfileLocal({ name: finalName || null, photoURL: finalPhoto });
+    let ok = true;
+    if (finalName) ok = await saveProfile(localPeerId, { name: finalName, photoURL: finalPhoto });
+    setSaving(false);
+    if (!ok) {
+      // Keep the user here so they know the cloud save didn't land — otherwise a
+      // silent failure looks identical to "it worked".
+      setError("Couldn't save to the cloud — your name may not reach peers. Check connection and retry, or continue anyway.");
+      return;
     }
+    onDone();
   };
 
   return (
@@ -81,11 +84,13 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
         />
         {showPreview ? <Image source={{ uri: trimmedPhoto }} style={styles.preview} /> : null}
 
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+
         <Pressable style={[styles.button, saving && styles.buttonDisabled]} onPress={() => void onSave()}>
           {saving ? <ActivityIndicator color="#04203a" /> : <Text style={styles.buttonText}>Save & continue</Text>}
         </Pressable>
         <Pressable style={styles.skip} onPress={onDone} disabled={saving}>
-          <Text style={styles.skipText}>Skip for now</Text>
+          <Text style={styles.skipText}>{error ? 'Continue anyway' : 'Skip for now'}</Text>
         </Pressable>
       </View>
     </View>
@@ -109,6 +114,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   preview: { width: 64, height: 64, borderRadius: 32, marginTop: 12, alignSelf: 'center', backgroundColor: '#0d1530' },
+  error: { color: '#ff9f9f', fontSize: 13, lineHeight: 19, marginTop: 14 },
   button: { marginTop: 22, backgroundColor: '#7cf9ff', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: '#04203a', fontSize: 16, fontWeight: '700' },
