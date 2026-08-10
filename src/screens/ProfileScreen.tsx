@@ -1,18 +1,20 @@
 /**
- * Profile setup: the local user sets the display name (and, optionally, a photo
- * URL) that peers will see on the bridge once they bond. Writes to the profile
- * backend under this device's persistent peerId and mirrors it locally.
+ * Profile setup: the local user sets the display name and photo that peers will
+ * see on the bridge once they bond. Writes to the profile backend under this
+ * device's persistent peerId and mirrors it locally.
  *
- * Photo is a pasted URL for now (zero native deps); a gallery picker + upload is
- * the planned #2b follow-up. Skipping is always allowed — the app is fully usable
+ * Photo sources: take a selfie (front camera), pick from the gallery, or paste a
+ * URL. A camera/gallery pick is uploaded to Storage on save and its download URL
+ * becomes the photoURL. Skipping is always allowed — the app is fully usable
  * anonymously, so this screen never blocks entry.
  *
  * NOTE: depends on React Native; not testable off-device.
  */
 import React, { useState } from 'react';
 import { View, Text, TextInput, Pressable, Image, StyleSheet, ActivityIndicator } from 'react-native';
+import { launchCamera, launchImageLibrary, type Asset } from 'react-native-image-picker';
 import { useStore } from '../state/store';
-import { saveProfile } from '../lib/profiles';
+import { saveProfile, uploadProfilePhoto } from '../lib/profiles';
 import { saveMyProfileLocal } from '../identity/persistentId';
 
 export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactElement {
@@ -23,30 +25,71 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
 
   const [name, setName] = useState(myName ?? '');
   const [photoURL, setPhotoURL] = useState(myPhotoURL ?? '');
+  // A locally-picked image (camera/gallery) not yet uploaded. Takes priority over
+  // the pasted URL until saved.
+  const [localUri, setLocalUri] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const trimmedPhoto = photoURL.trim();
-  const showPreview = /^https?:\/\//i.test(trimmedPhoto);
+  const previewUri = localUri ?? (/^https?:\/\//i.test(trimmedPhoto) ? trimmedPhoto : null);
+
+  const pick = (asset: Asset | undefined): void => {
+    if (asset?.uri) {
+      setLocalUri(asset.uri);
+      setError(null);
+    }
+  };
+
+  const takeSelfie = async (): Promise<void> => {
+    try {
+      const res = await launchCamera({ mediaType: 'photo', cameraType: 'front', quality: 0.7, maxWidth: 512, maxHeight: 512, saveToPhotos: false });
+      if (!res.didCancel && !res.errorCode) pick(res.assets?.[0]);
+    } catch {
+      /* camera unavailable/denied — ignore */
+    }
+  };
+
+  const chooseFromGallery = async (): Promise<void> => {
+    try {
+      const res = await launchImageLibrary({ mediaType: 'photo', quality: 0.7, maxWidth: 512, maxHeight: 512, selectionLimit: 1 });
+      if (!res.didCancel && !res.errorCode) pick(res.assets?.[0]);
+    } catch {
+      /* picker unavailable — ignore */
+    }
+  };
 
   const onSave = async (): Promise<void> => {
     if (saving) return;
     setSaving(true);
     setError(null);
     const finalName = name.trim();
-    const finalPhoto = trimmedPhoto || null;
-    // Local mirror always succeeds; the network write is what can fail.
+
+    // Resolve the photo: upload a freshly-picked local image, else use the URL.
+    let finalPhoto: string | null = trimmedPhoto || null;
+    if (localUri) {
+      const uploaded = await uploadProfilePhoto(localPeerId, localUri);
+      if (uploaded) {
+        finalPhoto = uploaded;
+      } else {
+        setSaving(false);
+        setError("Couldn't upload the photo — check connection and retry, or continue without it.");
+        return;
+      }
+    }
+
     setMyProfile(finalName || null, finalPhoto);
     await saveMyProfileLocal({ name: finalName || null, photoURL: finalPhoto });
     let ok = true;
     if (finalName) ok = await saveProfile(localPeerId, { name: finalName, photoURL: finalPhoto });
     setSaving(false);
     if (!ok) {
-      // Keep the user here so they know the cloud save didn't land — otherwise a
-      // silent failure looks identical to "it worked".
       setError("Couldn't save to the cloud — your name may not reach peers. Check connection and retry, or continue anyway.");
       return;
     }
+    // Reflect the resolved URL back into the field and clear the pending local pick.
+    if (finalPhoto) setPhotoURL(finalPhoto);
+    setLocalUri(null);
     onDone();
   };
 
@@ -55,7 +98,7 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
       <View style={styles.card}>
         <Text style={styles.title}>Your aura</Text>
         <Text style={styles.body}>
-          Set a name so people you bridge with know it's you. You can skip this and stay anonymous.
+          Set a name and photo so people you bridge with know it's you. You can skip this and stay anonymous.
         </Text>
 
         <Text style={styles.label}>Display name</Text>
@@ -70,11 +113,25 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
           returnKeyType="done"
         />
 
-        <Text style={styles.label}>Photo URL (optional)</Text>
+        <Text style={styles.label}>Photo</Text>
+        {previewUri ? <Image source={{ uri: previewUri }} style={styles.preview} /> : <View style={styles.previewEmpty} />}
+        <View style={styles.photoRow}>
+          <Pressable style={styles.photoButton} onPress={() => void takeSelfie()} disabled={saving}>
+            <Text style={styles.photoButtonText}>📷 Take selfie</Text>
+          </Pressable>
+          <Pressable style={styles.photoButton} onPress={() => void chooseFromGallery()} disabled={saving}>
+            <Text style={styles.photoButtonText}>🖼 Gallery</Text>
+          </Pressable>
+        </View>
+
+        <Text style={styles.labelSmall}>…or paste an image URL</Text>
         <TextInput
           style={styles.input}
           value={photoURL}
-          onChangeText={setPhotoURL}
+          onChangeText={(v) => {
+            setPhotoURL(v);
+            if (v) setLocalUri(null); // a typed URL supersedes a pending local pick
+          }}
           placeholder="https://…"
           placeholderTextColor="#5b6b82"
           autoCapitalize="none"
@@ -82,7 +139,6 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
           keyboardType="url"
           returnKeyType="done"
         />
-        {showPreview ? <Image source={{ uri: trimmedPhoto }} style={styles.preview} /> : null}
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -103,6 +159,7 @@ const styles = StyleSheet.create({
   title: { color: '#e6f1ff', fontSize: 22, fontWeight: '700', marginBottom: 8 },
   body: { color: '#9fb3c8', fontSize: 15, lineHeight: 22, marginBottom: 16 },
   label: { color: '#7cf9ff', fontSize: 12, fontWeight: '700', letterSpacing: 1, marginTop: 12, marginBottom: 6 },
+  labelSmall: { color: '#5b6b82', fontSize: 11, marginTop: 12, marginBottom: 6 },
   input: {
     backgroundColor: 'rgba(6,10,26,0.7)',
     borderRadius: 10,
@@ -113,7 +170,26 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 16,
   },
-  preview: { width: 64, height: 64, borderRadius: 32, marginTop: 12, alignSelf: 'center', backgroundColor: '#0d1530' },
+  preview: { width: 72, height: 72, borderRadius: 36, alignSelf: 'center', backgroundColor: '#0d1530', marginBottom: 10 },
+  previewEmpty: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignSelf: 'center',
+    backgroundColor: '#0d1530',
+    borderWidth: 1,
+    borderColor: 'rgba(124,249,255,0.15)',
+    marginBottom: 10,
+  },
+  photoRow: { flexDirection: 'row', justifyContent: 'center' },
+  photoButton: {
+    backgroundColor: 'rgba(124,249,255,0.12)',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginHorizontal: 6,
+  },
+  photoButtonText: { color: '#7cf9ff', fontSize: 14, fontWeight: '600' },
   error: { color: '#ff9f9f', fontSize: 13, lineHeight: 19, marginTop: 14 },
   button: { marginTop: 22, backgroundColor: '#7cf9ff', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
   buttonDisabled: { opacity: 0.6 },

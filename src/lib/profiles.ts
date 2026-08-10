@@ -24,6 +24,7 @@ import {
   type Firestore,
 } from 'firebase/firestore';
 import { initializeAuth, getReactNativePersistence, signInAnonymously, type Auth } from 'firebase/auth';
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { firebaseConfig, isFirebaseConfigured } from '../lib/firebaseConfig';
 
@@ -86,6 +87,27 @@ export async function fetchProfile(peerId: number): Promise<Profile | null> {
     if (!name) return null;
     const photoURL = typeof data.photoURL === 'string' && data.photoURL ? data.photoURL : null;
     return { name, photoURL };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Upload a local image (file:// or content:// URI, from camera or gallery) to
+ * Storage under this peerId and return its public download URL, or null on
+ * failure. The image is fetched into a blob first — RN's fetch handles both URI
+ * schemes.
+ */
+export async function uploadProfilePhoto(peerId: number, localUri: string): Promise<string | null> {
+  if (!ensureInit() || !app) return null;
+  try {
+    if (authReady) await authReady;
+    const storage = getStorage(app);
+    const r = storageRef(storage, `profilePhotos/${peerId >>> 0}.jpg`);
+    const resp = await fetch(localUri);
+    const blob = await resp.blob();
+    await uploadBytes(r, blob, { contentType: 'image/jpeg' });
+    return await getDownloadURL(r);
   } catch {
     return null;
   }

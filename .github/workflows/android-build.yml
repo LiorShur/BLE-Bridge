@@ -89,7 +89,8 @@ jobs:
             zustand@^4.5.4 \
             react-native-vision-camera@4.5.3 \
             firebase@^10.12.0 \
-            @react-native-async-storage/async-storage@^1.23.1
+            @react-native-async-storage/async-storage@^1.23.1 \
+            react-native-image-picker@^7.1.2
           # vision-camera needs minSdk 26 (also the project's floor) and Kotlin 1.9+.
           perl -0pi -e 's/minSdkVersion = 23/minSdkVersion = 26/' android/build.gradle
           perl -0pi -e 's/kotlinVersion = "[^"]*"/kotlinVersion = "1.9.24"/' android/build.gradle

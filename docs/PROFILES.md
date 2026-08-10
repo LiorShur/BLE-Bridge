@@ -54,6 +54,31 @@ peerId↔uid binding.
 
 ## Photos
 
-v0 (#2a): photo is a **pasted URL**, rendered directly (no native picker, no
-Storage write). The gallery-picker + Storage-upload path is the planned #2b
-follow-up; the `FIREBASE_STORAGE_BUCKET` secret is already wired for it.
+Three sources (`src/screens/ProfileScreen.tsx`, via `react-native-image-picker`):
+**take a selfie** (front camera), **choose from gallery**, or **paste a URL**. A
+camera/gallery pick is uploaded to Storage (`profilePhotos/{peerId}.jpg`) on save
+via `uploadProfilePhoto()`; its download URL becomes the profile `photoURL`.
+
+### Recommended Storage rules
+
+```
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /profilePhotos/{file} {
+      allow read: if true;                 // public avatars
+      allow write: if request.auth != null // signed in (anonymous ok)
+        && request.resource.size < 2 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+  }
+}
+```
+
+Same PoC caveat as Firestore: the path isn't tied to the auth uid, so any
+signed-in device could overwrite any avatar. Fine for a pilot.
+
+> **RN note:** Firestore is forced onto long-polling
+> (`experimentalForceLongPolling`) in `src/lib/profiles.ts` — the default
+> WebChannel transport does not work under React Native and silently fails reads
+> and writes.
