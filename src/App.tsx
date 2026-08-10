@@ -15,7 +15,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import { CameraBridge } from './ar/CameraBridge';
-import { ReactionBar, ReactionBursts } from './ui/Reactions';
+import { ReactionBar } from './ui/Reactions';
 import { DebugHUD } from './debug/DebugHUD';
 import { MessageScreen } from './screens/MessageScreen';
 import { CapabilityScreen } from './screens/CapabilityScreen';
@@ -40,7 +40,6 @@ function MainExperience(): React.ReactElement {
   return (
     <View style={styles.fill}>
       <CameraBridge />
-      <ReactionBursts />
       <ReactionBar />
       <DebugHUD />
       {/* Hidden HUD toggle (P4-6): long-press the top-right corner. */}

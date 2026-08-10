@@ -29,6 +29,7 @@ export function useAdvertiser(enabled: boolean, onError?: (e: AdvertiseError) =>
   const hasPublished = useRef(false);
   const inFlight = useRef(false);
   const lastReactionNonce = useRef(0);
+  const lastAckKey = useRef('');
 
   useEffect(() => {
     if (!enabled) return;
@@ -40,6 +41,7 @@ export function useAdvertiser(enabled: boolean, onError?: (e: AdvertiseError) =>
       const state = useStore.getState();
       const headingDecideg = headingDeg === null ? null : Math.round(headingDeg * 10) % 3600;
       const r = state.outgoingReaction;
+      const a = state.outgoingAck;
       const bytes = encodePayload({
         version: 1,
         peerId: state.localPeerId,
@@ -52,6 +54,8 @@ export function useAdvertiser(enabled: boolean, onError?: (e: AdvertiseError) =>
         reactionTarget: r?.targetPeerId ?? 0,
         reactionId: r?.reactionId ?? 0,
         reactionNonce: r?.nonce ?? 0,
+        ackTarget: a?.targetPeerId ?? 0,
+        ackNonce: a?.nonce ?? 0,
       });
       return bytesToBase64(bytes);
     };
@@ -64,16 +68,23 @@ export function useAdvertiser(enabled: boolean, onError?: (e: AdvertiseError) =>
       const store = useStore.getState();
       const { localHeadingDeg, localHeadingAccuracy } = store;
 
-      // Retire a reaction that has been broadcast long enough (receivers only
-      // need to catch it once, via the nonce).
+      // Retire a reaction / ack that has been broadcast long enough (receivers
+      // only need to catch it once, via the nonce).
       if (store.outgoingReaction && now - store.outgoingReaction.sentAt > REACTION_BROADCAST_MS) {
         store.clearOutgoingReaction();
       }
-      const reactionNonce = useStore.getState().outgoingReaction?.nonce ?? 0;
+      if (store.outgoingAck && now - store.outgoingAck.sentAt > REACTION_BROADCAST_MS) {
+        store.clearOutgoingAck();
+      }
+      const fresh = useStore.getState();
+      const reactionNonce = fresh.outgoingReaction?.nonce ?? 0;
       const reactionChanged = reactionNonce !== lastReactionNonce.current;
+      const ackKey = fresh.outgoingAck ? `${fresh.outgoingAck.targetPeerId}:${fresh.outgoingAck.nonce}` : '';
+      const ackChanged = ackKey !== lastAckKey.current;
 
       const due =
         reactionChanged ||
+        ackChanged ||
         shouldRepublish({
           prevHeadingDeg: lastHeading.current,
           nextHeadingDeg: localHeadingDeg,
@@ -96,6 +107,7 @@ export function useAdvertiser(enabled: boolean, onError?: (e: AdvertiseError) =>
         lastHeading.current = localHeadingDeg;
         lastPublishAt.current = now;
         lastReactionNonce.current = reactionNonce;
+        lastAckKey.current = ackKey;
         useStore.getState().setAdvertiserStatus(true, null);
       } catch (e) {
         if (e instanceof AdvertiseError) {

@@ -82,6 +82,13 @@ export interface IncomingReaction {
   at: number;
 }
 
+/** A delivery ack this device is broadcasting back to a reaction's sender. */
+export interface OutgoingAck {
+  targetPeerId: number;
+  nonce: number;
+  sentAt: number;
+}
+
 export interface AppState {
   capability: SupportReport | null;
   localPeerId: number;
@@ -102,6 +109,10 @@ export interface AppState {
   scanError: string | null;
   /** Reaction currently being broadcast (null = none). */
   outgoingReaction: OutgoingReaction | null;
+  /** Delivery ack currently being broadcast back to a sender (null = none). */
+  outgoingAck: OutgoingAck | null;
+  /** Nonces we've recently sent, to match an incoming ack → "delivered". */
+  recentSentNonces: number[];
   /** Recently received reactions to animate. */
   incomingReactions: IncomingReaction[];
   hudVisible: boolean;
@@ -119,8 +130,10 @@ export interface AppState {
   sendReaction: (targetPeerId: number, reactionId: number) => void;
   /** Stop broadcasting the current outgoing reaction. */
   clearOutgoingReaction: () => void;
-  /** Record a received reaction for animation. */
-  pushIncomingReaction: (fromPeerId: number, reactionId: number) => void;
+  /** Record a received reaction (animate it) and start acking it to the sender. */
+  pushIncomingReaction: (fromPeerId: number, reactionId: number, reactionNonce: number) => void;
+  /** Stop broadcasting the current outgoing ack. */
+  clearOutgoingAck: () => void;
   toggleHud: () => void;
 }
 
@@ -146,6 +159,8 @@ export const useStore = create<AppState>((set) => {
     advertiserError: null,
     scanError: null,
     outgoingReaction: null,
+    outgoingAck: null,
+    recentSentNonces: [],
     incomingReactions: [],
     hudVisible: false,
 
@@ -161,17 +176,25 @@ export const useStore = create<AppState>((set) => {
     setScanError: (error) => set({ scanError: error }),
     sendReaction: (targetPeerId, reactionId) =>
       set((s) => {
-        const nonce = ((s.outgoingReaction?.nonce ?? 0) % 255) + 1; // 1..255, always changes
-        return { outgoingReaction: { targetPeerId, reactionId, nonce, sentAt: Date.now() } };
+        const nonce = ((s.outgoingReaction?.nonce ?? s.recentSentNonces[s.recentSentNonces.length - 1] ?? 0) % 255) + 1;
+        return {
+          outgoingReaction: { targetPeerId, reactionId, nonce, sentAt: Date.now() },
+          recentSentNonces: [...s.recentSentNonces, nonce].slice(-8),
+        };
       }),
     clearOutgoingReaction: () => set({ outgoingReaction: null }),
-    pushIncomingReaction: (fromPeerId, reactionId) =>
+    pushIncomingReaction: (fromPeerId, reactionId, reactionNonce) =>
       set((s) => {
         const key = (s.incomingReactions[s.incomingReactions.length - 1]?.key ?? 0) + 1;
         const now = Date.now();
         const kept = s.incomingReactions.filter((r) => now - r.at < 2500);
-        return { incomingReactions: [...kept, { key, fromPeerId, reactionId, at: now }].slice(-6) };
+        return {
+          incomingReactions: [...kept, { key, fromPeerId, reactionId, at: now }].slice(-6),
+          // Ack the sender so their device can play a "delivered" cue.
+          outgoingAck: { targetPeerId: fromPeerId, nonce: reactionNonce, sentAt: now },
+        };
       }),
+    clearOutgoingAck: () => set({ outgoingAck: null }),
     toggleHud: () => set((s) => ({ hudVisible: !s.hudVisible })),
   };
 });

@@ -12,6 +12,7 @@ interface NativeSound {
   breakTone(): void;
   send(): void;
   receive(): void;
+  delivered(): void;
 }
 
 const mod = NativeModules.Sound as NativeSound | undefined;
@@ -29,4 +30,6 @@ export const Sound = {
   breakTone: (): void => safe((m) => m.breakTone()),
   send: (): void => safe((m) => m.send()),
   receive: (): void => safe((m) => m.receive()),
+  /** Played on the *sender's* device when a peer confirms receipt. */
+  delivered: (): void => safe((m) => m.delivered()),
 };

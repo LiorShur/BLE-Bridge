@@ -96,6 +96,8 @@ describe('decodePayload', () => {
       reactionTarget: 0xdeadbeef,
       reactionId: 3,
       reactionNonce: 17,
+      ackTarget: 0x0102abcd,
+      ackNonce: 200,
     };
     const decoded = decodePayload(encodePayload(original));
     expect(decoded).toEqual(original);

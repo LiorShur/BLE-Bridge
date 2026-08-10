@@ -18,7 +18,9 @@ import { View, Text, Animated, Easing, Vibration, StyleSheet, Dimensions } from 
 import { useStore } from '../state/store';
 import { hueByteToHex } from '../ar/effects';
 import { Sound } from '../audio/sound';
+import { reactionById } from '../reactions';
 import type { BondState } from '../signal/bond';
+import type { IncomingReaction } from '../state/store';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const MAX_BEAM = SCREEN_H * 0.4;
@@ -31,7 +33,25 @@ function statusLabel(b: BondState | undefined): string {
   return 'nearby';
 }
 
-function Beam({ bond }: { bond: BondState }): React.ReactElement {
+/** Short human-readable tag for a peer id — the last 16 bits as hex. */
+function shortPeerTag(peerId: number): string {
+  return '#' + (peerId & 0xffff).toString(16).toUpperCase().padStart(4, '0');
+}
+
+/** One received reaction floating up from its sender's beam. */
+function ReactionFloat({ reactionId }: { reactionId: number }): React.ReactElement {
+  const t = useRef(new Animated.Value(0)).current;
+  const emoji = reactionById(reactionId)?.emoji ?? '✨';
+  useEffect(() => {
+    Animated.timing(t, { toValue: 1, duration: 1500, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  }, [t]);
+  const translateY = t.interpolate({ inputRange: [0, 1], outputRange: [0, -150] });
+  const scale = t.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0.4, 1.3, 1] });
+  const opacity = t.interpolate({ inputRange: [0, 0.15, 0.7, 1], outputRange: [0, 1, 1, 0] });
+  return <Animated.Text style={[styles.float, { opacity, transform: [{ translateY }, { scale }] }]}>{emoji}</Animated.Text>;
+}
+
+function Beam({ bond, reactions }: { bond: BondState; reactions: IncomingReaction[] }): React.ReactElement {
   const hue = bond.peer ? hueByteToHex(bond.peer.hue) : '#7cf9ff';
   const strength = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
@@ -91,6 +111,10 @@ function Beam({ bond }: { bond: BondState }): React.ReactElement {
   return (
     <View style={styles.beamItem}>
       <View style={styles.reticleHolder}>
+        {/* Received reactions float up from this specific peer's reticle. */}
+        {reactions.map((r) => (
+          <ReactionFloat key={r.key} reactionId={r.reactionId} />
+        ))}
         <Animated.View
           style={[styles.burst, { borderColor: hue, opacity: burstOpacity, transform: [{ scale: burstScale }] }]}
         />
@@ -98,6 +122,13 @@ function Beam({ bond }: { bond: BondState }): React.ReactElement {
           style={[styles.reticle, { borderColor: hue, shadowColor: hue, opacity: reticleOpacity, transform: [{ scale: reticleScale }] }]}
         />
       </View>
+      {/* Identity chip: which device this beam is. */}
+      {bond.peer ? (
+        <View style={styles.chip}>
+          <View style={[styles.chipDot, { backgroundColor: hue }]} />
+          <Text style={styles.chipText}>{shortPeerTag(bond.peer.peerId)}</Text>
+        </View>
+      ) : null}
       <Animated.View
         style={[styles.beam, { width: beamWidth, height: beamHeight, opacity: beamOpacity, backgroundColor: hue, shadowColor: hue }]}
       />
@@ -107,8 +138,28 @@ function Beam({ bond }: { bond: BondState }): React.ReactElement {
 
 export function BridgeOverlay(): React.ReactElement {
   const bonds = useStore((s) => s.bonds);
+  const incoming = useStore((s) => s.incomingReactions);
   const list = bonds.slice(0, MAX_BEAMS);
   const primary = list[0];
+
+  // Fire the "received" audio/haptic cue once per freshly-arrived reaction.
+  const seen = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    for (const r of incoming) {
+      if (!seen.current.has(r.key)) {
+        seen.current.add(r.key);
+        Sound.receive();
+        try {
+          Vibration.vibrate(20);
+        } catch {
+          /* no-op */
+        }
+      }
+    }
+  }, [incoming]);
+
+  const reactionsByPeer = (peerId: number | undefined): IncomingReaction[] =>
+    peerId == null ? [] : incoming.filter((r) => r.fromPeerId === peerId);
 
   const showTurnHint = primary?.peer != null && primary.peer.heading !== null && primary.alignment < 0.7 && !primary.bonded;
 
@@ -116,7 +167,7 @@ export function BridgeOverlay(): React.ReactElement {
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       <View style={styles.beamRow}>
         {list.map((b) => (
-          <Beam key={b.peer?.peerId ?? Math.random()} bond={b} />
+          <Beam key={b.peer?.peerId ?? Math.random()} bond={b} reactions={reactionsByPeer(b.peer?.peerId)} />
         ))}
       </View>
 
@@ -143,6 +194,18 @@ const styles = StyleSheet.create({
   },
   beamItem: { alignItems: 'center', justifyContent: 'flex-end', marginHorizontal: 18 },
   reticleHolder: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  float: { position: 'absolute', fontSize: 44 },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(6,10,26,0.55)',
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    marginBottom: 6,
+  },
+  chipDot: { width: 8, height: 8, borderRadius: 4, marginRight: 5 },
+  chipText: { color: '#cfe0f5', fontSize: 11, fontWeight: '600', letterSpacing: 0.5 },
   reticle: {
     position: 'absolute',
     width: 40,

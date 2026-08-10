@@ -11,6 +11,7 @@
 import { useEffect, useRef } from 'react';
 import { BleScanner, type ScanObservation } from '../ble/scanner';
 import { useStore } from '../state/store';
+import { Sound } from '../audio/sound';
 import {
   initPeerEngine,
   ingestObservation,
@@ -71,6 +72,7 @@ export function useBondEngine(enabled: boolean, onScanError?: (e: Error) => void
   const lastScanStartAt = useRef(0);
   const scanErrorRef = useRef<string | null>(null);
   const lastReactionNonceByPeer = useRef<Map<number, number>>(new Map());
+  const lastAckNonceByPeer = useRef<Map<number, number>>(new Map());
 
   useEffect(() => {
     if (!enabled) return;
@@ -91,18 +93,33 @@ export function useBondEngine(enabled: boolean, onScanError?: (e: Error) => void
         useStore.getState().setScanError(null); // results flowing again
       }
 
-      // Reaction addressed to us? Fire once per fresh nonce from that sender.
+      const eo = toEngineObservation(obs);
+      const prev = peers.current.get(eo.peerId) ?? initPeerEngine(eo.peerId);
+      const next = ingestObservation(prev, eo, local(), tunablesFromStore());
+      peers.current.set(eo.peerId, next);
+
       const p = obs.payload;
-      if (p.reactionId !== 0 && p.reactionTarget === localPeerId) {
+
+      // Reaction addressed to us? Fire once per fresh nonce from that sender —
+      // but only while actually bonded to them, so a stray broadcast during
+      // "forming" can't pop an emoji before the bridge is real.
+      if (p.reactionId !== 0 && p.reactionTarget === localPeerId && next.machine.bonded) {
         if (lastReactionNonceByPeer.current.get(p.peerId) !== p.reactionNonce) {
           lastReactionNonceByPeer.current.set(p.peerId, p.reactionNonce);
-          useStore.getState().pushIncomingReaction(p.peerId, p.reactionId);
+          useStore.getState().pushIncomingReaction(p.peerId, p.reactionId, p.reactionNonce);
         }
       }
 
-      const eo = toEngineObservation(obs);
-      const prev = peers.current.get(eo.peerId) ?? initPeerEngine(eo.peerId);
-      peers.current.set(eo.peerId, ingestObservation(prev, eo, local(), tunablesFromStore()));
+      // Delivery ack addressed to us? If it confirms a reaction we recently
+      // sent, play the "delivered" cue once per fresh ack from that peer.
+      if (p.ackTarget === localPeerId && p.ackNonce !== 0) {
+        if (lastAckNonceByPeer.current.get(p.peerId) !== p.ackNonce) {
+          lastAckNonceByPeer.current.set(p.peerId, p.ackNonce);
+          if (useStore.getState().recentSentNonces.includes(p.ackNonce)) {
+            Sound.delivered();
+          }
+        }
+      }
     };
     const onErr = (err: Error): void => {
       // Surface the reason (ble-plx reports e.g. location-services-disabled) and

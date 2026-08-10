@@ -58,9 +58,15 @@ export interface DecodedPayload {
   reactionTarget: number; // uint32: peerId this reaction targets (0 = none)
   reactionId: number; // uint8: which reaction (0 = none) — see reactions.ts
   reactionNonce: number; // uint8: increments per fresh send, so receivers fire once
+  /**
+   * Delivery ack (bytes 18–22): "I received your reaction". ackTarget echoes the
+   * original sender's peerId; ackNonce echoes the reactionNonce being confirmed.
+   */
+  ackTarget: number; // uint32 (0 = none)
+  ackNonce: number; // uint8
 }
 
-/** Fields accepted by {@link encodePayload}. Reaction fields default to 0. */
+/** Fields accepted by {@link encodePayload}. Reaction/ack fields default to 0. */
 export interface PayloadFields {
   version: number;
   peerId: number;
@@ -73,12 +79,17 @@ export interface PayloadFields {
   reactionTarget?: number;
   reactionId?: number;
   reactionNonce?: number;
+  ackTarget?: number;
+  ackNonce?: number;
 }
 
 /** Byte offset of the reaction block (bytes 12–17). */
 export const REACTION_OFFSET = 12;
-/** Minimum buffer length to carry the reaction block. */
+/** Byte offset of the delivery-ack block (bytes 18–22). */
+export const ACK_OFFSET = 18;
+/** Minimum buffer length to carry the reaction block / the ack block. */
 const REACTION_END = 18;
+const ACK_END = 23;
 
 /** `flags` bitfield masks — see PAYLOAD_SPEC §5. */
 export const FLAG_AVAILABLE = 0x01;
@@ -122,9 +133,13 @@ export function encodePayload(fields: PayloadFields): Uint8Array {
   const reactionTarget = fields.reactionTarget ?? 0;
   const reactionId = fields.reactionId ?? 0;
   const reactionNonce = fields.reactionNonce ?? 0;
+  const ackTarget = fields.ackTarget ?? 0;
+  const ackNonce = fields.ackNonce ?? 0;
   assertUint(reactionTarget, 32, 'reactionTarget');
   assertUint(reactionId, 8, 'reactionId');
   assertUint(reactionNonce, 8, 'reactionNonce');
+  assertUint(ackTarget, 32, 'ackTarget');
+  assertUint(ackNonce, 8, 'ackNonce');
 
   const buf = new Uint8Array(PAYLOAD_BYTES); // trailing reserved block stays zero
   const view = new DataView(buf.buffer);
@@ -139,6 +154,8 @@ export function encodePayload(fields: PayloadFields): Uint8Array {
   view.setUint32(REACTION_OFFSET, reactionTarget, false);
   view.setUint8(REACTION_OFFSET + 4, reactionId);
   view.setUint8(REACTION_OFFSET + 5, reactionNonce);
+  view.setUint32(ACK_OFFSET, ackTarget, false);
+  view.setUint8(ACK_OFFSET + 4, ackNonce);
   return buf;
 }
 
@@ -180,14 +197,21 @@ export function decodePayload(bytes: Uint8Array): DecodedPayload | null {
   const flags = view.getUint8(10);
   const sequence = view.getUint8(11);
 
-  // Reaction block (bytes 12–17). Absent on short/old packets → default 0.
+  // Reaction block (bytes 12–17) and ack block (bytes 18–22). Absent on
+  // short/old packets → default 0.
   let reactionTarget = 0;
   let reactionId = 0;
   let reactionNonce = 0;
+  let ackTarget = 0;
+  let ackNonce = 0;
   if (bytes.length >= REACTION_END) {
     reactionTarget = view.getUint32(REACTION_OFFSET, false);
     reactionId = view.getUint8(REACTION_OFFSET + 4);
     reactionNonce = view.getUint8(REACTION_OFFSET + 5);
+  }
+  if (bytes.length >= ACK_END) {
+    ackTarget = view.getUint32(ACK_OFFSET, false);
+    ackNonce = view.getUint8(ACK_OFFSET + 4);
   }
 
   return {
@@ -202,6 +226,8 @@ export function decodePayload(bytes: Uint8Array): DecodedPayload | null {
     reactionTarget,
     reactionId,
     reactionNonce,
+    ackTarget,
+    ackNonce,
   };
 }
 

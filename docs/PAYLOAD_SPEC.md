@@ -27,7 +27,7 @@ with `ADVERTISE_FAILED_DATA_TOO_LARGE` (error code 1).
 
 ## 2. Layout
 
-18 bytes used, 6 reserved.
+23 bytes used, 1 reserved.
 
 | Offset | Size | Field | Type | Description |
 |---:|---:|---|---|---|
@@ -42,12 +42,15 @@ with `ADVERTISE_FAILED_DATA_TOO_LARGE` (error code 1).
 | 12 | 4 | `reactionTarget` | uint32 BE | peerId this reaction is addressed to; `0` = none. See §9. |
 | 16 | 1 | `reactionId` | uint8 | Which reaction (`0` = none). Catalog in `src/reactions.ts`. |
 | 17 | 1 | `reactionNonce` | uint8 | Increments per fresh send so a receiver fires exactly once. |
-| 18 | 6 | `reserved` | — | Must be written as zero. Receivers must ignore. |
+| 18 | 4 | `ackTarget` | uint32 BE | peerId whose reaction this confirms; `0` = none. See §9. |
+| 22 | 1 | `ackNonce` | uint8 | Echoes the `reactionNonce` being confirmed. |
+| 23 | 1 | `reserved` | — | Must be written as zero. Receivers must ignore. |
 
-> **Reactions were added in the previously-reserved block (bytes 12–17) without a
-> version bump.** Because §6 requires receivers to ignore reserved bytes and
-> tolerate short/long buffers, a pre-reaction (version-1) build simply reads these
-> as 0 and ignores them — the forward-compatibility the reserved block was for.
+> **Reactions (bytes 12–17) and the delivery ack (bytes 18–22) were added in the
+> previously-reserved block without a version bump.** Because §6 requires
+> receivers to ignore reserved bytes and tolerate short/long buffers, a build
+> that predates either field simply reads it as 0 and ignores it — the
+> forward-compatibility the reserved block was for.
 
 ### Reference encoding
 
@@ -189,8 +192,21 @@ one-way broadcast — no GATT connection.
   own `peerId`, and only when `(senderPeerId, reactionNonce)` is one it hasn't
   seen — so a reaction repeated across many packets fires exactly once.
 
+### Delivery ack (bytes 18–22)
+
+A soft-ack rides the same broadcast so a sender can show a "delivered" cue. When
+a receiver acts on a reaction it broadcasts, for ~2 s, `ackTarget` = the original
+sender's `peerId` and `ackNonce` = the `reactionNonce` it just consumed. The
+original sender plays its "delivered" tone when it sees an ack addressed to it
+whose `ackNonce` matches a reaction it recently sent (deduped per
+`(peerId, ackNonce)`).
+
+This is still best-effort: the ack is itself an unacknowledged broadcast, so a
+missed ack simply means no "delivered" cue — never a lost reaction. It only ever
+*adds* a confirmation; it never gates delivery.
+
 **Properties and limits (inherent to the connectionless design, CLAUDE.md §3.1):**
-best-effort (no acknowledgement — an optional soft-ack could be added by echoing
-the received nonce); broadcast, not private (addressed by `peerId`, but anyone in
-range can observe it); and tiny (a fixed catalog, not arbitrary data). Rich or
-reliable messaging would require a GATT channel — a deliberate non-goal here.
+best-effort (the soft-ack above is the only receipt signal); broadcast, not
+private (addressed by `peerId`, but anyone in range can observe it); and tiny (a
+fixed catalog, not arbitrary data). Rich or reliable messaging would require a
+GATT channel — a deliberate non-goal here.
