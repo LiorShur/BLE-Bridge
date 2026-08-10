@@ -29,7 +29,13 @@ Do not build these unless explicitly asked:
   **Scope change (2026-08-09, owner request):** multiple simultaneous peers ARE
   now in scope. The signal layer already handled N; the UI renders all active
   bonds. Build order: get two devices solid first, then generalise the visual to N.
-- Accounts, backend, persistence, analytics
+- ~~Accounts, backend, persistence, analytics~~
+  **Scope change (2026-08-10, owner request):** an *optional* backend for peer
+  identity is now in scope — a tiny public profile ({name, photoURL}) fetched on
+  bond, keyed by a now-persistent `peerId` (Firebase JS SDK, anonymous auth). It
+  degrades to the anonymous hue + #TAG when unconfigured/offline. Still no
+  accounts and no analytics. The BLE payload is unchanged — identity still rides
+  `peerId`; only the name/photo lookup is out-of-band.
 - Cloud Anchors or UWB (these are the documented upgrade path, not the PoC)
 
 ---

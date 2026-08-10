@@ -30,6 +30,9 @@
     "src/state",
     "src/permissions.ts",
     "src/ar/arcore.ts",
-    "src/audio"
+    "src/audio",
+    "src/lib/profiles.ts",
+    "src/identity",
+    "src/profiles"
   ]
 }

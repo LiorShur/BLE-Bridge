@@ -14,14 +14,14 @@
  * NOTE: depends on React Native; not part of the pure-logic test suite.
  */
 import React, { useEffect, useRef } from 'react';
-import { View, Text, Animated, Easing, Vibration, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, Image, Animated, Easing, Vibration, StyleSheet, Dimensions } from 'react-native';
 import { useStore } from '../state/store';
 import { hueByteToHex } from '../ar/effects';
 import { Sound } from '../audio/sound';
 import { reactionById } from '../reactions';
 import { shortPeerTag } from './peerLabel';
 import type { BondState } from '../signal/bond';
-import type { IncomingReaction } from '../state/store';
+import type { IncomingReaction, ProfileEntry } from '../state/store';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const MAX_BEAM = SCREEN_H * 0.4;
@@ -47,7 +47,15 @@ function ReactionFloat({ reactionId }: { reactionId: number }): React.ReactEleme
   return <Animated.Text style={[styles.float, { opacity, transform: [{ translateY }, { scale }] }]}>{emoji}</Animated.Text>;
 }
 
-function Beam({ bond, reactions }: { bond: BondState; reactions: IncomingReaction[] }): React.ReactElement {
+function Beam({
+  bond,
+  reactions,
+  profile,
+}: {
+  bond: BondState;
+  reactions: IncomingReaction[];
+  profile: ProfileEntry | undefined;
+}): React.ReactElement {
   const hue = bond.peer ? hueByteToHex(bond.peer.hue) : '#7cf9ff';
   const strength = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
@@ -118,11 +126,17 @@ function Beam({ bond, reactions }: { bond: BondState; reactions: IncomingReactio
           style={[styles.reticle, { borderColor: hue, shadowColor: hue, opacity: reticleOpacity, transform: [{ scale: reticleScale }] }]}
         />
       </View>
-      {/* Identity chip: which device this beam is. */}
+      {/* Identity chip: the peer's profile name/photo once known, else hue + #TAG. */}
       {bond.peer ? (
         <View style={styles.chip}>
-          <View style={[styles.chipDot, { backgroundColor: hue }]} />
-          <Text style={styles.chipText}>{shortPeerTag(bond.peer.peerId)}</Text>
+          {profile?.status === 'loaded' && profile.photoURL ? (
+            <Image source={{ uri: profile.photoURL }} style={[styles.chipAvatar, { borderColor: hue }]} />
+          ) : (
+            <View style={[styles.chipDot, { backgroundColor: hue }]} />
+          )}
+          <Text style={styles.chipText} numberOfLines={1}>
+            {profile?.status === 'loaded' && profile.name ? profile.name : shortPeerTag(bond.peer.peerId)}
+          </Text>
         </View>
       ) : null}
       <Animated.View
@@ -135,6 +149,7 @@ function Beam({ bond, reactions }: { bond: BondState; reactions: IncomingReactio
 export function BridgeOverlay(): React.ReactElement {
   const bonds = useStore((s) => s.bonds);
   const incoming = useStore((s) => s.incomingReactions);
+  const profiles = useStore((s) => s.profiles);
   const list = bonds.slice(0, MAX_BEAMS);
   const primary = list[0];
 
@@ -163,7 +178,12 @@ export function BridgeOverlay(): React.ReactElement {
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       <View style={styles.beamRow}>
         {list.map((b) => (
-          <Beam key={b.peer?.peerId ?? Math.random()} bond={b} reactions={reactionsByPeer(b.peer?.peerId)} />
+          <Beam
+            key={b.peer?.peerId ?? Math.random()}
+            bond={b}
+            reactions={reactionsByPeer(b.peer?.peerId)}
+            profile={b.peer ? profiles[b.peer.peerId >>> 0] : undefined}
+          />
         ))}
       </View>
 
@@ -201,7 +221,8 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   chipDot: { width: 8, height: 8, borderRadius: 4, marginRight: 5 },
-  chipText: { color: '#cfe0f5', fontSize: 11, fontWeight: '600', letterSpacing: 0.5 },
+  chipAvatar: { width: 18, height: 18, borderRadius: 9, marginRight: 6, borderWidth: 1, backgroundColor: '#0d1530' },
+  chipText: { color: '#cfe0f5', fontSize: 11, fontWeight: '600', letterSpacing: 0.5, maxWidth: 96 },
   reticle: {
     position: 'absolute',
     width: 40,

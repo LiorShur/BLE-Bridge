@@ -89,6 +89,13 @@ export interface OutgoingAck {
   sentAt: number;
 }
 
+/** Cached profile lookup for a peer (name/photo fetched on bond). */
+export interface ProfileEntry {
+  status: 'loading' | 'loaded' | 'missing';
+  name?: string;
+  photoURL?: string | null;
+}
+
 export interface AppState {
   capability: SupportReport | null;
   localPeerId: number;
@@ -115,11 +122,23 @@ export interface AppState {
   recentSentNonces: number[];
   /** Recently received reactions to animate. */
   incomingReactions: IncomingReaction[];
+  /** Peer profiles fetched on bond, keyed by peerId. */
+  profiles: Record<number, ProfileEntry>;
+  /** The local user's own display name (null = not set yet). */
+  myName: string | null;
+  /** The local user's own photo URL (null = none). */
+  myPhotoURL: string | null;
   hudVisible: boolean;
 
   setCapability: (report: SupportReport) => void;
+  /** Replace the local peerId (after loading the persisted one at startup). */
+  setLocalPeerId: (peerId: number) => void;
   setLocalTxPower: (dbm: number) => void;
   setLocalHeading: (headingDeg: number | null, accuracy: number) => void;
+  /** Record a peer profile lookup result (or its in-flight/absent status). */
+  setProfileEntry: (peerId: number, entry: ProfileEntry) => void;
+  /** Set the local user's own profile (name + optional photo). */
+  setMyProfile: (name: string | null, photoURL: string | null) => void;
   setTunable: <K extends keyof Tunables>(key: K, value: Tunables[K]) => void;
   setBond: (bond: BondState) => void;
   setBonds: (bonds: BondState[]) => void;
@@ -162,9 +181,13 @@ export const useStore = create<AppState>((set) => {
     outgoingAck: null,
     recentSentNonces: [],
     incomingReactions: [],
+    profiles: {},
+    myName: null,
+    myPhotoURL: null,
     hudVisible: false,
 
     setCapability: (report) => set({ capability: report }),
+    setLocalPeerId: (peerId) => set({ localPeerId: peerId, hue: hueForPeer(peerId) }),
     setLocalTxPower: (dbm) => set({ localTxPower: dbm }),
     setLocalHeading: (headingDeg, accuracy) =>
       set({ localHeadingDeg: headingDeg, localHeadingAccuracy: accuracy }),
@@ -195,6 +218,9 @@ export const useStore = create<AppState>((set) => {
         };
       }),
     clearOutgoingAck: () => set({ outgoingAck: null }),
+    setProfileEntry: (peerId, entry) =>
+      set((s) => ({ profiles: { ...s.profiles, [peerId >>> 0]: entry } })),
+    setMyProfile: (name, photoURL) => set({ myName: name, myPhotoURL: photoURL }),
     toggleHud: () => set((s) => ({ hudVisible: !s.hudVisible })),
   };
 });

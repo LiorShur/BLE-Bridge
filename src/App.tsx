@@ -20,14 +20,17 @@ import { DebugHUD } from './debug/DebugHUD';
 import { MessageScreen } from './screens/MessageScreen';
 import { CapabilityScreen } from './screens/CapabilityScreen';
 import { OnboardingScreen } from './screens/OnboardingScreen';
+import { ProfileScreen } from './screens/ProfileScreen';
 import { requestAllPermissions } from './permissions';
 import { isSupported, type SupportReport } from './ble/advertiser';
 import { useStore } from './state/store';
 import { useCompassHeading } from './sensors/useCompassHeading';
 import { useAdvertiser } from './ble/useAdvertiser';
 import { useBondEngine } from './signal/useBondEngine';
+import { useProfiles } from './profiles/useProfiles';
+import { loadOrCreatePeerId, loadMyProfile } from './identity/persistentId';
 
-type Phase = 'checking' | 'permsDenied' | 'capability' | 'onboarding' | 'ready';
+type Phase = 'checking' | 'permsDenied' | 'capability' | 'onboarding' | 'profile' | 'ready';
 
 function MainExperience(): React.ReactElement {
   const toggleHud = useStore((s) => s.toggleHud);
@@ -36,6 +39,7 @@ function MainExperience(): React.ReactElement {
   useCompassHeading();
   useAdvertiser(true);
   useBondEngine(true);
+  useProfiles();
 
   return (
     <View style={styles.fill}>
@@ -58,6 +62,14 @@ export default function App(): React.ReactElement {
 
   const runChecks = useCallback(async (): Promise<void> => {
     setPhase('checking');
+    // Load the persistent identity + own profile before anything advertises, so
+    // peerId (and the profile keyed by it) is stable for this launch.
+    const store = useStore.getState();
+    const peerId = await loadOrCreatePeerId();
+    store.setLocalPeerId(peerId);
+    const mine = await loadMyProfile();
+    store.setMyProfile(mine.name, mine.photoURL);
+
     const perms = await requestAllPermissions();
     if (!perms.granted) {
       setPhase('permsDenied');
@@ -99,7 +111,10 @@ export default function App(): React.ReactElement {
       );
 
     case 'onboarding':
-      return <OnboardingScreen onStart={() => setPhase('ready')} />;
+      return <OnboardingScreen onStart={() => setPhase('profile')} />;
+
+    case 'profile':
+      return <ProfileScreen onDone={() => setPhase('ready')} />;
 
     case 'ready':
       return <MainExperience />;
