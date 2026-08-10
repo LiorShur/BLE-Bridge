@@ -70,12 +70,14 @@ export function useBondEngine(enabled: boolean, onScanError?: (e: Error) => void
   const lastObsAt = useRef(0);
   const lastScanStartAt = useRef(0);
   const scanErrorRef = useRef<string | null>(null);
+  const lastReactionNonceByPeer = useRef<Map<number, number>>(new Map());
 
   useEffect(() => {
     if (!enabled) return;
 
     const scanner = new BleScanner();
     scannerRef.current = scanner;
+    const localPeerId = useStore.getState().localPeerId;
 
     const local = () => {
       const s = useStore.getState();
@@ -88,6 +90,16 @@ export function useBondEngine(enabled: boolean, onScanError?: (e: Error) => void
         scanErrorRef.current = null;
         useStore.getState().setScanError(null); // results flowing again
       }
+
+      // Reaction addressed to us? Fire once per fresh nonce from that sender.
+      const p = obs.payload;
+      if (p.reactionId !== 0 && p.reactionTarget === localPeerId) {
+        if (lastReactionNonceByPeer.current.get(p.peerId) !== p.reactionNonce) {
+          lastReactionNonceByPeer.current.set(p.peerId, p.reactionNonce);
+          useStore.getState().pushIncomingReaction(p.peerId, p.reactionId);
+        }
+      }
+
       const eo = toEngineObservation(obs);
       const prev = peers.current.get(eo.peerId) ?? initPeerEngine(eo.peerId);
       peers.current.set(eo.peerId, ingestObservation(prev, eo, local(), tunablesFromStore()));

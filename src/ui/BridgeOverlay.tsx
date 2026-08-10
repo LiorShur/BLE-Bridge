@@ -17,6 +17,7 @@ import React, { useEffect, useRef } from 'react';
 import { View, Text, Animated, Easing, Vibration, StyleSheet, Dimensions } from 'react-native';
 import { useStore } from '../state/store';
 import { hueByteToHex } from '../ar/effects';
+import { Sound } from '../audio/sound';
 import type { BondState } from '../signal/bond';
 
 const { height: SCREEN_H } = Dimensions.get('window');
@@ -54,8 +55,11 @@ function Beam({ bond }: { bond: BondState }): React.ReactElement {
       } catch {
         /* vibrator unavailable/denied — never let the moment crash the app */
       }
+      Sound.formation();
       burst.setValue(0);
       Animated.timing(burst, { toValue: 1, duration: 650, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
+    } else if (!bond.bonded && wasBonded.current) {
+      Sound.breakTone();
     }
     wasBonded.current = bond.bonded;
   }, [bond.bonded, burst]);

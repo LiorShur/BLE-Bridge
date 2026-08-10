@@ -27,7 +27,7 @@ with `ADVERTISE_FAILED_DATA_TOO_LARGE` (error code 1).
 
 ## 2. Layout
 
-12 bytes used, 12 reserved.
+18 bytes used, 6 reserved.
 
 | Offset | Size | Field | Type | Description |
 |---:|---:|---|---|---|
@@ -39,7 +39,15 @@ with `ADVERTISE_FAILED_DATA_TOO_LARGE` (error code 1).
 | 9 | 1 | `hue` | uint8 | Aura colour seed. Map to `0`–`360°` as `hue × 360 / 255`. |
 | 10 | 1 | `flags` | uint8 | Bitfield, see §5. |
 | 11 | 1 | `sequence` | uint8 | Increments on each republish, wraps at 255. Lets the receiver measure refresh rate and detect a stalled advertiser. |
-| 12 | 12 | `reserved` | — | Must be written as zero. Receivers must ignore. |
+| 12 | 4 | `reactionTarget` | uint32 BE | peerId this reaction is addressed to; `0` = none. See §9. |
+| 16 | 1 | `reactionId` | uint8 | Which reaction (`0` = none). Catalog in `src/reactions.ts`. |
+| 17 | 1 | `reactionNonce` | uint8 | Increments per fresh send so a receiver fires exactly once. |
+| 18 | 6 | `reserved` | — | Must be written as zero. Receivers must ignore. |
+
+> **Reactions were added in the previously-reserved block (bytes 12–17) without a
+> version bump.** Because §6 requires receivers to ignore reserved bytes and
+> tolerate short/long buffers, a pre-reaction (version-1) build simply reads these
+> as 0 and ignores them — the forward-compatibility the reserved block was for.
 
 ### Reference encoding
 
@@ -166,3 +174,23 @@ bytes to 8. The field layout in §2 is unchanged. Pick an unallocated 16-bit
 value for the PoC and move to a proper 128-bit UUID before any release — noting
 that a 128-bit UUID costs 18 bytes and will not fit alongside this payload in a
 single legacy advertisement.
+
+---
+
+## 9. Reactions (bytes 12–17)
+
+A bonded pair can exchange small predefined "reactions" (❤️ 👋 ✨ …) over the same
+one-way broadcast — no GATT connection.
+
+- The sender writes `reactionTarget` = the recipient's `peerId`, `reactionId` =
+  the catalog id (`src/reactions.ts`), and bumps `reactionNonce`. It broadcasts
+  this for ~2 s, then reverts `reactionId` to 0.
+- A receiver acts only when `reactionId != 0` **and** `reactionTarget` equals its
+  own `peerId`, and only when `(senderPeerId, reactionNonce)` is one it hasn't
+  seen — so a reaction repeated across many packets fires exactly once.
+
+**Properties and limits (inherent to the connectionless design, CLAUDE.md §3.1):**
+best-effort (no acknowledgement — an optional soft-ack could be added by echoing
+the received nonce); broadcast, not private (addressed by `peerId`, but anyone in
+range can observe it); and tiny (a fixed catalog, not arbitrary data). Rich or
+reliable messaging would require a GATT channel — a deliberate non-goal here.

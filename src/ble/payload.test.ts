@@ -84,7 +84,7 @@ describe('encodePayload', () => {
 
 describe('decodePayload', () => {
   it('round-trips every field', () => {
-    const original: PayloadFields = {
+    const original = {
       version: 0x01,
       peerId: 0x0102abcd,
       headingDecideg: 1274,
@@ -93,9 +93,35 @@ describe('decodePayload', () => {
       hue: 200,
       flags: 0b00000101,
       sequence: 250,
+      reactionTarget: 0xdeadbeef,
+      reactionId: 3,
+      reactionNonce: 17,
     };
     const decoded = decodePayload(encodePayload(original));
     expect(decoded).toEqual(original);
+  });
+
+  it('defaults reaction fields to 0 when omitted', () => {
+    const decoded = decodePayload(encodePayload(withHeading(500)));
+    expect(decoded?.reactionTarget).toBe(0);
+    expect(decoded?.reactionId).toBe(0);
+    expect(decoded?.reactionNonce).toBe(0);
+  });
+
+  it('round-trips the reaction block (targeted reaction)', () => {
+    const bytes = encodePayload({ ...base, headingDecideg: 0, reactionTarget: 0xa3f91c4e, reactionId: 5, reactionNonce: 42 });
+    const decoded = decodePayload(bytes);
+    expect(decoded?.reactionTarget).toBe(0xa3f91c4e);
+    expect(decoded?.reactionId).toBe(5);
+    expect(decoded?.reactionNonce).toBe(42);
+  });
+
+  it('reads reaction fields as 0 from an old 12-byte packet', () => {
+    const full = encodePayload({ ...base, headingDecideg: 0, reactionId: 9, reactionNonce: 1 });
+    const short = full.subarray(0, 12); // pre-reaction sender
+    const decoded = decodePayload(short);
+    expect(decoded?.peerId).toBe(base.peerId);
+    expect(decoded?.reactionId).toBe(0);
   });
 
   it('round-trips the heading-unavailable sentinel to null', () => {

@@ -29,6 +29,7 @@
     "src/signal/useBondEngine.ts",
     "src/state",
     "src/permissions.ts",
-    "src/ar/arcore.ts"
+    "src/ar/arcore.ts",
+    "src/audio"
   ]
 }

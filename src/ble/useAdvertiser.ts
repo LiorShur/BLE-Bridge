@@ -28,14 +28,18 @@ export function useAdvertiser(enabled: boolean, onError?: (e: AdvertiseError) =>
   const lastPublishAt = useRef(0);
   const hasPublished = useRef(false);
   const inFlight = useRef(false);
+  const lastReactionNonce = useRef(0);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
 
+    const REACTION_BROADCAST_MS = 2000;
+
     const buildBase64 = (headingDeg: number | null, accuracy: number): string => {
       const state = useStore.getState();
       const headingDecideg = headingDeg === null ? null : Math.round(headingDeg * 10) % 3600;
+      const r = state.outgoingReaction;
       const bytes = encodePayload({
         version: 1,
         peerId: state.localPeerId,
@@ -45,6 +49,9 @@ export function useAdvertiser(enabled: boolean, onError?: (e: AdvertiseError) =>
         hue: state.hue,
         flags: FLAG_AVAILABLE,
         sequence: sequence.current & 0xff,
+        reactionTarget: r?.targetPeerId ?? 0,
+        reactionId: r?.reactionId ?? 0,
+        reactionNonce: r?.nonce ?? 0,
       });
       return bytesToBase64(bytes);
     };
@@ -54,13 +61,25 @@ export function useAdvertiser(enabled: boolean, onError?: (e: AdvertiseError) =>
       // republishes were a real source of advertising gaps (bridge flicker).
       if (inFlight.current) return;
 
-      const { localHeadingDeg, localHeadingAccuracy } = useStore.getState();
-      const due = shouldRepublish({
-        prevHeadingDeg: lastHeading.current,
-        nextHeadingDeg: localHeadingDeg,
-        msSinceLastPublish: now - lastPublishAt.current,
-        hasPublished: hasPublished.current,
-      });
+      const store = useStore.getState();
+      const { localHeadingDeg, localHeadingAccuracy } = store;
+
+      // Retire a reaction that has been broadcast long enough (receivers only
+      // need to catch it once, via the nonce).
+      if (store.outgoingReaction && now - store.outgoingReaction.sentAt > REACTION_BROADCAST_MS) {
+        store.clearOutgoingReaction();
+      }
+      const reactionNonce = useStore.getState().outgoingReaction?.nonce ?? 0;
+      const reactionChanged = reactionNonce !== lastReactionNonce.current;
+
+      const due =
+        reactionChanged ||
+        shouldRepublish({
+          prevHeadingDeg: lastHeading.current,
+          nextHeadingDeg: localHeadingDeg,
+          msSinceLastPublish: now - lastPublishAt.current,
+          hasPublished: hasPublished.current,
+        });
       if (!due) return;
 
       inFlight.current = true;
@@ -76,6 +95,7 @@ export function useAdvertiser(enabled: boolean, onError?: (e: AdvertiseError) =>
         hasPublished.current = true;
         lastHeading.current = localHeadingDeg;
         lastPublishAt.current = now;
+        lastReactionNonce.current = reactionNonce;
         useStore.getState().setAdvertiserStatus(true, null);
       } catch (e) {
         if (e instanceof AdvertiseError) {

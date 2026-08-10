@@ -66,6 +66,22 @@ const EMPTY_BOND: BondState = {
   peer: null,
 };
 
+/** A reaction this device is currently broadcasting toward a peer. */
+export interface OutgoingReaction {
+  targetPeerId: number;
+  reactionId: number;
+  nonce: number;
+  sentAt: number;
+}
+
+/** A reaction received from a peer, awaiting a brief on-screen animation. */
+export interface IncomingReaction {
+  key: number;
+  fromPeerId: number;
+  reactionId: number;
+  at: number;
+}
+
 export interface AppState {
   capability: SupportReport | null;
   localPeerId: number;
@@ -84,6 +100,10 @@ export interface AppState {
   advertiserError: string | null;
   /** Last BLE scan error (e.g. location services disabled), cleared on results. */
   scanError: string | null;
+  /** Reaction currently being broadcast (null = none). */
+  outgoingReaction: OutgoingReaction | null;
+  /** Recently received reactions to animate. */
+  incomingReactions: IncomingReaction[];
   hudVisible: boolean;
 
   setCapability: (report: SupportReport) => void;
@@ -95,6 +115,12 @@ export interface AppState {
   setPeerRows: (rows: PeerDebugRow[]) => void;
   setAdvertiserStatus: (advertising: boolean, error: string | null) => void;
   setScanError: (error: string | null) => void;
+  /** Start broadcasting a reaction toward a peer (fresh nonce each call). */
+  sendReaction: (targetPeerId: number, reactionId: number) => void;
+  /** Stop broadcasting the current outgoing reaction. */
+  clearOutgoingReaction: () => void;
+  /** Record a received reaction for animation. */
+  pushIncomingReaction: (fromPeerId: number, reactionId: number) => void;
   toggleHud: () => void;
 }
 
@@ -119,6 +145,8 @@ export const useStore = create<AppState>((set) => {
     advertising: false,
     advertiserError: null,
     scanError: null,
+    outgoingReaction: null,
+    incomingReactions: [],
     hudVisible: false,
 
     setCapability: (report) => set({ capability: report }),
@@ -131,6 +159,19 @@ export const useStore = create<AppState>((set) => {
     setPeerRows: (rows) => set({ peerRows: rows }),
     setAdvertiserStatus: (advertising, error) => set({ advertising, advertiserError: error }),
     setScanError: (error) => set({ scanError: error }),
+    sendReaction: (targetPeerId, reactionId) =>
+      set((s) => {
+        const nonce = ((s.outgoingReaction?.nonce ?? 0) % 255) + 1; // 1..255, always changes
+        return { outgoingReaction: { targetPeerId, reactionId, nonce, sentAt: Date.now() } };
+      }),
+    clearOutgoingReaction: () => set({ outgoingReaction: null }),
+    pushIncomingReaction: (fromPeerId, reactionId) =>
+      set((s) => {
+        const key = (s.incomingReactions[s.incomingReactions.length - 1]?.key ?? 0) + 1;
+        const now = Date.now();
+        const kept = s.incomingReactions.filter((r) => now - r.at < 2500);
+        return { incomingReactions: [...kept, { key, fromPeerId, reactionId, at: now }].slice(-6) };
+      }),
     toggleHud: () => set((s) => ({ hudVisible: !s.hudVisible })),
   };
 });

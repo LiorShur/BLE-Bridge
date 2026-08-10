@@ -51,10 +51,34 @@ export interface DecodedPayload {
   flags: number;
   /** 0..255, wraps; lets the receiver measure refresh rate. */
   sequence: number;
+  /**
+   * Reaction addressing (bytes 12–17, formerly reserved — version stays 1 so old
+   * builds ignore them, per PAYLOAD_SPEC §6). A reaction is "for" a specific peer.
+   */
+  reactionTarget: number; // uint32: peerId this reaction targets (0 = none)
+  reactionId: number; // uint8: which reaction (0 = none) — see reactions.ts
+  reactionNonce: number; // uint8: increments per fresh send, so receivers fire once
 }
 
-/** Fields accepted by {@link encodePayload}. Same shape as {@link DecodedPayload}. */
-export type PayloadFields = DecodedPayload;
+/** Fields accepted by {@link encodePayload}. Reaction fields default to 0. */
+export interface PayloadFields {
+  version: number;
+  peerId: number;
+  headingDecideg: number | null;
+  headingAccuracy: number;
+  txPower: number;
+  hue: number;
+  flags: number;
+  sequence: number;
+  reactionTarget?: number;
+  reactionId?: number;
+  reactionNonce?: number;
+}
+
+/** Byte offset of the reaction block (bytes 12–17). */
+export const REACTION_OFFSET = 12;
+/** Minimum buffer length to carry the reaction block. */
+const REACTION_END = 18;
 
 /** `flags` bitfield masks — see PAYLOAD_SPEC §5. */
 export const FLAG_AVAILABLE = 0x01;
@@ -95,7 +119,14 @@ export function encodePayload(fields: PayloadFields): Uint8Array {
   assertUint(flags, 8, 'flags');
   assertUint(sequence, 8, 'sequence');
 
-  const buf = new Uint8Array(PAYLOAD_BYTES); // reserved block stays zero
+  const reactionTarget = fields.reactionTarget ?? 0;
+  const reactionId = fields.reactionId ?? 0;
+  const reactionNonce = fields.reactionNonce ?? 0;
+  assertUint(reactionTarget, 32, 'reactionTarget');
+  assertUint(reactionId, 8, 'reactionId');
+  assertUint(reactionNonce, 8, 'reactionNonce');
+
+  const buf = new Uint8Array(PAYLOAD_BYTES); // trailing reserved block stays zero
   const view = new DataView(buf.buffer);
   view.setUint8(0, version);
   view.setUint32(1, peerId, false); // big-endian
@@ -105,6 +136,9 @@ export function encodePayload(fields: PayloadFields): Uint8Array {
   view.setUint8(9, hue);
   view.setUint8(10, flags);
   view.setUint8(11, sequence);
+  view.setUint32(REACTION_OFFSET, reactionTarget, false);
+  view.setUint8(REACTION_OFFSET + 4, reactionId);
+  view.setUint8(REACTION_OFFSET + 5, reactionNonce);
   return buf;
 }
 
@@ -146,7 +180,29 @@ export function decodePayload(bytes: Uint8Array): DecodedPayload | null {
   const flags = view.getUint8(10);
   const sequence = view.getUint8(11);
 
-  return { version, peerId, headingDecideg, headingAccuracy, txPower, hue, flags, sequence };
+  // Reaction block (bytes 12–17). Absent on short/old packets → default 0.
+  let reactionTarget = 0;
+  let reactionId = 0;
+  let reactionNonce = 0;
+  if (bytes.length >= REACTION_END) {
+    reactionTarget = view.getUint32(REACTION_OFFSET, false);
+    reactionId = view.getUint8(REACTION_OFFSET + 4);
+    reactionNonce = view.getUint8(REACTION_OFFSET + 5);
+  }
+
+  return {
+    version,
+    peerId,
+    headingDecideg,
+    headingAccuracy,
+    txPower,
+    hue,
+    flags,
+    sequence,
+    reactionTarget,
+    reactionId,
+    reactionNonce,
+  };
 }
 
 /** Convert wire decidegrees to degrees, preserving the `null` sentinel. */
