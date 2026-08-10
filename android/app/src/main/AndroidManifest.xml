@@ -6,6 +6,9 @@
     <!-- Stage 2: camera for the AR view. -->
     <uses-permission android:name="android.permission.CAMERA" />
 
+    <!-- Haptic on bond formation (VIBRATE is install-time but must be declared). -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <!-- BLE scan. neverForLocation stops the system forcing a location grant
          (CLAUDE.md §6). We do not derive location from BLE. -->
     <uses-permission

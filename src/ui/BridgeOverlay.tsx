@@ -49,7 +49,11 @@ function Beam({ bond }: { bond: BondState }): React.ReactElement {
   // Formation moment: haptic + burst ring on the bonded transition.
   useEffect(() => {
     if (bond.bonded && !wasBonded.current) {
-      Vibration.vibrate(45);
+      try {
+        Vibration.vibrate(45);
+      } catch {
+        /* vibrator unavailable/denied — never let the moment crash the app */
+      }
       burst.setValue(0);
       Animated.timing(burst, { toValue: 1, duration: 650, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
     }
