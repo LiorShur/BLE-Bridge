@@ -24,7 +24,7 @@ import {
   type Firestore,
 } from 'firebase/firestore';
 import { initializeAuth, getReactNativePersistence, signInAnonymously, type Auth } from 'firebase/auth';
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { getStorage, ref as storageRef, uploadString, getDownloadURL } from 'firebase/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { firebaseConfig, isFirebaseConfigured } from '../lib/firebaseConfig';
 
@@ -92,24 +92,35 @@ export async function fetchProfile(peerId: number): Promise<Profile | null> {
   }
 }
 
+export interface UploadResult {
+  url?: string;
+  /** Firebase error code (e.g. 'storage/unauthorized') or a reason string. */
+  error?: string;
+}
+
 /**
- * Upload a local image (file:// or content:// URI, from camera or gallery) to
- * Storage under this peerId and return its public download URL, or null on
- * failure. The image is fetched into a blob first — RN's fetch handles both URI
- * schemes.
+ * Upload a base64-encoded JPEG (from react-native-image-picker's `base64`) to
+ * Storage under this peerId and return its public download URL.
+ *
+ * Uses `uploadString(..., 'base64')` rather than fetch()->blob()->uploadBytes:
+ * React Native's Blob does not interoperate reliably with the Firebase JS SDK's
+ * uploadBytes (a well-known RN pitfall — uploads hang or fail), whereas a base64
+ * string upload is robust. Returns the Firebase error code on failure so the UI
+ * can distinguish a rules problem (storage/unauthorized) from a bucket/config
+ * problem (storage/unknown).
  */
-export async function uploadProfilePhoto(peerId: number, localUri: string): Promise<string | null> {
-  if (!ensureInit() || !app) return null;
+export async function uploadProfilePhoto(peerId: number, base64: string): Promise<UploadResult> {
+  if (!ensureInit() || !app) return { error: 'firebase-unconfigured' };
   try {
     if (authReady) await authReady;
     const storage = getStorage(app);
     const r = storageRef(storage, `profilePhotos/${peerId >>> 0}.jpg`);
-    const resp = await fetch(localUri);
-    const blob = await resp.blob();
-    await uploadBytes(r, blob, { contentType: 'image/jpeg' });
-    return await getDownloadURL(r);
-  } catch {
-    return null;
+    await uploadString(r, base64, 'base64', { contentType: 'image/jpeg' });
+    const url = await getDownloadURL(r);
+    return { url };
+  } catch (e) {
+    const code = (e as { code?: string })?.code ?? (e as Error)?.message ?? 'upload-failed';
+    return { error: code };
   }
 }
 

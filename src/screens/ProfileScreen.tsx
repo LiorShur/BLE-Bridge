@@ -25,9 +25,10 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
 
   const [name, setName] = useState(myName ?? '');
   const [photoURL, setPhotoURL] = useState(myPhotoURL ?? '');
-  // A locally-picked image (camera/gallery) not yet uploaded. Takes priority over
-  // the pasted URL until saved.
+  // A locally-picked image (camera/gallery) not yet uploaded: uri for preview,
+  // base64 for the upload. Takes priority over the pasted URL until saved.
   const [localUri, setLocalUri] = useState<string | null>(null);
+  const [localBase64, setLocalBase64] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,13 +38,14 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
   const pick = (asset: Asset | undefined): void => {
     if (asset?.uri) {
       setLocalUri(asset.uri);
+      setLocalBase64(asset.base64 ?? null);
       setError(null);
     }
   };
 
   const takeSelfie = async (): Promise<void> => {
     try {
-      const res = await launchCamera({ mediaType: 'photo', cameraType: 'front', quality: 0.7, maxWidth: 512, maxHeight: 512, saveToPhotos: false });
+      const res = await launchCamera({ mediaType: 'photo', cameraType: 'front', quality: 0.6, maxWidth: 512, maxHeight: 512, includeBase64: true, saveToPhotos: false });
       if (!res.didCancel && !res.errorCode) pick(res.assets?.[0]);
     } catch {
       /* camera unavailable/denied — ignore */
@@ -52,7 +54,7 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
 
   const chooseFromGallery = async (): Promise<void> => {
     try {
-      const res = await launchImageLibrary({ mediaType: 'photo', quality: 0.7, maxWidth: 512, maxHeight: 512, selectionLimit: 1 });
+      const res = await launchImageLibrary({ mediaType: 'photo', quality: 0.6, maxWidth: 512, maxHeight: 512, includeBase64: true, selectionLimit: 1 });
       if (!res.didCancel && !res.errorCode) pick(res.assets?.[0]);
     } catch {
       /* picker unavailable — ignore */
@@ -65,31 +67,34 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
     setError(null);
     const finalName = name.trim();
 
-    // Resolve the photo: upload a freshly-picked local image, else use the URL.
+    // Resolve the photo, but NEVER let a photo failure block saving the name.
     let finalPhoto: string | null = trimmedPhoto || null;
-    if (localUri) {
-      const uploaded = await uploadProfilePhoto(localPeerId, localUri);
-      if (uploaded) {
-        finalPhoto = uploaded;
-      } else {
-        setSaving(false);
-        setError("Couldn't upload the photo — check connection and retry, or continue without it.");
-        return;
-      }
+    let photoError: string | null = null;
+    if (localBase64) {
+      const res = await uploadProfilePhoto(localPeerId, localBase64);
+      if (res.url) finalPhoto = res.url;
+      else photoError = res.error ?? 'upload-failed';
     }
 
     setMyProfile(finalName || null, finalPhoto);
     await saveMyProfileLocal({ name: finalName || null, photoURL: finalPhoto });
-    let ok = true;
-    if (finalName) ok = await saveProfile(localPeerId, { name: finalName, photoURL: finalPhoto });
+    let nameOk = true;
+    if (finalName) nameOk = await saveProfile(localPeerId, { name: finalName, photoURL: finalPhoto });
     setSaving(false);
-    if (!ok) {
-      setError("Couldn't save to the cloud — your name may not reach peers. Check connection and retry, or continue anyway.");
+
+    if (photoError) {
+      setError(`Photo upload failed (${photoError}). Your name was saved — retry the photo or continue without it.`);
       return;
     }
-    // Reflect the resolved URL back into the field and clear the pending local pick.
-    if (finalPhoto) setPhotoURL(finalPhoto);
-    setLocalUri(null);
+    if (!nameOk) {
+      setError("Couldn't save your name to the cloud — check connection and retry, or continue anyway.");
+      return;
+    }
+    if (finalPhoto) {
+      setPhotoURL(finalPhoto);
+      setLocalUri(null);
+      setLocalBase64(null);
+    }
     onDone();
   };
 
