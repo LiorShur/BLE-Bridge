@@ -44,6 +44,7 @@ interface NativeBleAdvertiser {
   updatePayload(payloadBase64: string): Promise<void>;
   stopAdvertising(): Promise<void>;
   getStatus(): Promise<AdvertiserStatus>;
+  setInteropMode(enabled: boolean, serviceUuid: string | null): Promise<void>;
 }
 
 export class AdvertiseError extends Error {
@@ -136,6 +137,21 @@ export function stopAdvertising(): Promise<void> {
 
 export function getStatus(): Promise<AdvertiserStatus> {
   return nativeModule().getStatus();
+}
+
+/**
+ * Enable/disable interop (GATT) advertising: when enabled, subsequent
+ * (re)advertising is connectable and carries `serviceUuid` in the scan response
+ * (docs/GATT_SPEC.md §2). Call before advertising; takes effect on next
+ * republish. Best-effort — resolves silently if the native method is absent
+ * (older APK), so the connectionless build is unaffected.
+ */
+export async function setInteropMode(enabled: boolean, serviceUuid: string | null): Promise<void> {
+  try {
+    await nativeModule().setInteropMode(enabled, serviceUuid);
+  } catch {
+    /* best-effort; older native module without this method */
+  }
 }
 
 interface CancelablePromise extends Promise<void> {

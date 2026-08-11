@@ -33,6 +33,7 @@
     "src/audio",
     "src/lib/profiles.ts",
     "src/identity",
-    "src/profiles"
+    "src/profiles",
+    "src/ble/gatt/gattServer.ts"
   ]
 }

@@ -53,6 +53,14 @@ class BleAdvertiserModule(private val reactContext: ReactApplicationContext) :
   private var lastPublishAtMs = 0L
   private var wasActiveBeforePause = false
 
+  // Interop (GATT) mode — off by default, so behaviour is byte-identical to the
+  // connectionless design until explicitly enabled (docs/GATT_SPEC.md §2). When
+  // on: advertise CONNECTABLE and carry the Bridge service UUID in the SCAN
+  // RESPONSE (a second 31-byte packet), leaving the manufacturer payload in the
+  // primary AdvData untouched.
+  private var connectable = false
+  private var serviceUuid: String? = null
+
   // A SINGLE callback instance: Android requires the same reference to stop an
   // advertisement it started with. A fresh callback per call silently no-ops stop.
   private val advertiseCallback =
@@ -114,6 +122,21 @@ class BleAdvertiserModule(private val reactContext: ReactApplicationContext) :
           })
     }
     promise.resolve(report)
+  }
+
+  /**
+   * Configure interop (GATT) advertising. When `enabled`, the next start/update
+   * advertises connectable and includes `serviceUuid` in the scan response. Call
+   * before advertising; a change takes effect on the next republish. Passing
+   * enabled=false restores the exact connectionless behaviour.
+   */
+  @ReactMethod
+  fun setInteropMode(enabled: Boolean, serviceUuidStr: String?, promise: Promise) {
+    UiThreadUtil.runOnUiThread {
+      connectable = enabled
+      serviceUuid = if (enabled) serviceUuidStr else null
+      promise.resolve(null)
+    }
   }
 
   @ReactMethod
@@ -208,11 +231,14 @@ class BleAdvertiserModule(private val reactContext: ReactApplicationContext) :
       return
     }
 
+    // Connectable only in interop mode; the connectionless default stays false
+    // (CLAUDE.md §3.1). Connectable advertising still carries manufacturer data
+    // that scanners read WITHOUT connecting, so Android↔Android is unchanged.
     val settings =
         AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
-            .setConnectable(false) // deliberate — connectionless design (CLAUDE.md §3.1)
+            .setConnectable(connectable)
             .setTimeout(0) // advertise indefinitely; non-zero caps at 180 s
             .build()
 
@@ -223,10 +249,29 @@ class BleAdvertiserModule(private val reactContext: ReactApplicationContext) :
             .addManufacturerData(COMPANY_ID, bytes)
             .build()
 
+    // Interop: put the 128-bit service UUID in the SCAN RESPONSE — its own 31-byte
+    // packet — so it never competes with the manufacturer payload for space.
+    val scanResponse =
+        serviceUuid?.let { uuid ->
+          try {
+            AdvertiseData.Builder()
+                .setIncludeDeviceName(false)
+                .setIncludeTxPowerLevel(false)
+                .addServiceUuid(ParcelUuid.fromString(uuid))
+                .build()
+          } catch (e: IllegalArgumentException) {
+            null // bad UUID string — fall back to no scan response
+          }
+        }
+
     try {
       lastPayload = bytes
       lastPublishAtMs = System.currentTimeMillis()
-      advertiser.startAdvertising(settings, data, advertiseCallback)
+      if (scanResponse != null) {
+        advertiser.startAdvertising(settings, data, scanResponse, advertiseCallback)
+      } else {
+        advertiser.startAdvertising(settings, data, advertiseCallback)
+      }
       // Resolve the call promise now; authoritative success/failure is delivered
       // via the started/failed events, which the JS wrapper waits on.
       promise?.resolve(null)
