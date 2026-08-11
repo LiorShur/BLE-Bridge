@@ -8,6 +8,7 @@
  * NOTE: depends on `zustand`; not part of the pure-logic test suite.
  */
 import { create } from 'zustand';
+import { Platform } from 'react-native';
 import type { BondState } from '../signal/bond';
 import type { PeerDebugRow } from '../signal/engine';
 import type { SupportReport } from '../ble/advertiser';
@@ -200,7 +201,10 @@ export const useStore = create<AppState>((set) => {
     advertising: false,
     advertiserError: null,
     scanError: null,
-    gattEnabled: GATT_ENABLED,
+    // iOS has no connectionless (manufacturer-data) path — it can only bridge via
+    // the GATT interop path, so it's on by default there. Android defaults to the
+    // config flag (debug toggle).
+    gattEnabled: Platform.OS === 'ios' ? true : GATT_ENABLED,
     peerTransports: {},
     gattStatus: { serverRunning: false, subscribers: 0, connections: 0 },
     gattError: null,

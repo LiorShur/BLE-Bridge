@@ -13,7 +13,7 @@
  * NOTE: depends on React Native + Viro; not testable off-device.
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Pressable, StyleSheet, ActivityIndicator, Platform } from 'react-native';
 import { CameraBridge } from './ar/CameraBridge';
 import { ReactionBar } from './ui/Reactions';
 import { DebugHUD } from './debug/DebugHUD';
@@ -36,10 +36,11 @@ function MainExperience(): React.ReactElement {
   const toggleHud = useStore((s) => s.toggleHud);
   const gattEnabled = useStore((s) => s.gattEnabled);
 
-  // Mount the full signal stack. The advertiser and bond engine re-init when the
-  // GATT interop toggle flips (debug), so they pick up the new transport.
+  // Mount the full signal stack. On iOS (P-i2a) there's no native advertiser yet,
+  // so advertising is not mounted — the iPhone participates as a GATT central and
+  // bonds to interop-enabled Androids it connects to.
   useCompassHeading();
-  useAdvertiser(true, gattEnabled);
+  useAdvertiser(Platform.OS !== 'ios', gattEnabled);
   useBondEngine(true, gattEnabled);
   useProfiles();
 

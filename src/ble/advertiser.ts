@@ -10,7 +10,7 @@
  * NOTE: depends on React Native; not part of the pure-logic test suite. See
  * src/README.md for what is and isn't verifiable off-device.
  */
-import { NativeEventEmitter, NativeModules } from 'react-native';
+import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 
 export type AdvertiseErrorCode =
   | 'DATA_TOO_LARGE'
@@ -99,6 +99,17 @@ export function onAdvertiserEvent(handlers: {
 
 /** Startup capability probe (task P0-6). Never throws. */
 export function isSupported(): Promise<SupportReport> {
+  // iOS (P-i2a) has no native advertiser module yet — it participates as a GATT
+  // CENTRAL only. Report supported so the capability gate passes; advertising is
+  // simply not mounted on iOS.
+  if (Platform.OS === 'ios') {
+    return Promise.resolve({
+      supported: true,
+      bluetoothPresent: true,
+      bluetoothEnabled: true,
+      advertisingSupported: false,
+    });
+  }
   return nativeModule().isSupported();
 }
 

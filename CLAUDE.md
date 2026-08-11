@@ -22,7 +22,13 @@ only insofar as it serves that.
 
 Do not build these unless explicitly asked:
 
-- iOS support (Android only — this removes most of the BLE complexity)
+- ~~iOS support (Android only — this removes most of the BLE complexity)~~
+  **Scope change (2026-08-11, owner request):** Android↔iOS interop IS now in
+  scope. iOS cannot advertise manufacturer data, so the interop path is
+  GATT-based (`docs/GATT_SPEC.md`, `docs/IOS_INTEROP.md`) — dual-stack with the
+  connectionless Android↔Android path. Build: `docs/IOS_SETUP.md`. P-i2a (iPhone
+  as GATT central) uses ble-plx's iOS central + minimal app changes; P-i2b adds a
+  Swift `CBPeripheralManager` so the iPhone is discoverable too.
 - GATT connections, pairing, or bonding (see §3.1 — the design is connectionless)
 - Background operation (foreground only; screen on, app open)
 - ~~More than two simultaneous peers (the data model allows N, the UI assumes 1)~~
