@@ -8,7 +8,6 @@
  * NOTE: depends on `zustand`; not part of the pure-logic test suite.
  */
 import { create } from 'zustand';
-import { Platform } from 'react-native';
 import type { BondState } from '../signal/bond';
 import type { PeerDebugRow } from '../signal/engine';
 import type { SupportReport } from '../ble/advertiser';
@@ -17,7 +16,6 @@ import { DEFAULT_ALPHA, DEFAULT_PATH_LOSS_N, D_NEAR, D_FAR } from '../signal/rss
 import { DEFAULT_TOLERANCE } from '../signal/alignment';
 import { DEFAULT_BOND_CONFIG } from '../signal/bond';
 import { DEFAULT_TX_POWER } from '../calibration';
-import { GATT_ENABLED } from '../config';
 
 /** On-device tunable constants (HUD sliders, TASKS.md P2-8). */
 export interface Tunables {
@@ -201,10 +199,10 @@ export const useStore = create<AppState>((set) => {
     advertising: false,
     advertiserError: null,
     scanError: null,
-    // iOS has no connectionless (manufacturer-data) path — it can only bridge via
-    // the GATT interop path, so it's on by default there. Android defaults to the
-    // config flag (debug toggle).
-    gattEnabled: Platform.OS === 'ios' ? true : GATT_ENABLED,
+    // Interop is ON by default on both platforms — a device should pick up peers
+    // of either platform without any toggle. (The HUD toggle remains for debug.)
+    // Android reads Android over ADV and iPhones over GATT; iOS is GATT-only.
+    gattEnabled: true,
     peerTransports: {},
     gattStatus: { serverRunning: false, subscribers: 0, connections: 0 },
     gattError: null,

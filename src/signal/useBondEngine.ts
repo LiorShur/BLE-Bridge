@@ -18,7 +18,6 @@ import { useEffect, useRef } from 'react';
 import { BleManager } from 'react-native-ble-plx';
 import { BleScanner, type ScanObservation } from '../ble/scanner';
 import { GattClient } from '../ble/gatt/gattClient';
-import { shouldInitiateConnection } from '../ble/gatt/constants';
 import { useStore } from '../state/store';
 import { Sound } from '../audio/sound';
 import {
@@ -35,9 +34,6 @@ import {
 } from './engine';
 
 const TICK_MS = 100;
-
-/** Only open a GATT connection once a peer is this close (proximity 0..1). */
-const CONNECT_MIN_PROXIMITY = 0.4;
 
 function tunablesFromStore(): EngineTunables {
   const t = useStore.getState().tunables;
@@ -157,18 +153,11 @@ export function useBondEngine(
     };
 
     const onAdvObs = (obs: ScanObservation): void => {
-      const next = ingest(obs, 'adv');
-      // Interop: dial peers we should be central for (lower peerId), but only once
-      // the peer is genuinely CLOSE — connecting to faint/far peers is the main
-      // source of Android GATT-133 churn, and the bridge only matters up close.
-      const gatt = gattRef.current;
-      if (
-        gatt &&
-        shouldInitiateConnection(localPeerId, obs.payload.peerId) &&
-        next.machine.proximity > CONNECT_MIN_PROXIMITY
-      ) {
-        gatt.ensureConnected(obs.deviceId, obs.payload.peerId, (g) => ingest(g, 'gatt'), onGattErr);
-      }
+      // A manufacturer-data peer is another Android (or the ADV side of any
+      // device). We already have its full payload from the advertisement — no
+      // GATT connection is needed or wanted here. GATT is only used to reach
+      // iPhones, which surface via onGattCandidate (no manufacturer data).
+      ingest(obs, 'adv');
     };
 
     // A peer advertising the Bridge service UUID with no manufacturer data — an
