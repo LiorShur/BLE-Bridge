@@ -148,5 +148,7 @@ should see a device advertising service UUID
 - **txPower**: iOS doesn't expose the advertised TX reference; when the iPhone
   becomes a peripheral (P-i2b) it will advertise a per-model constant from
   `docs/CALIBRATION.md`.
-- **Distribution**: this runs via Xcode to your own device. Ad-hoc `.ipa` for
-  other testers (and/or a macOS CI) is a later step — see `docs/IOS_INTEROP.md` §6.
+- **Distribution**: this runs via Xcode to your own device (free team, 7-day
+  expiry). To get a build onto **other** iPhones — Ad Hoc `.ipa`, TestFlight, or
+  an automated macOS CI — see **`docs/IOS_DISTRIBUTION.md`** (all three paths,
+  and how to produce the `.p12`). Every path needs a paid Apple Developer account.

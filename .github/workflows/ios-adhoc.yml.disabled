@@ -1,0 +1,199 @@
+# iOS Ad Hoc IPA (Camera bridge) — TEMPLATE, DISABLED BY DEFAULT.
+#
+# This file ends in `.yml.disabled` on purpose: GitHub only runs `*.yml`, so this
+# NEVER executes (and never spends macOS minutes) until you:
+#   1. Create the signing secrets listed in docs/IOS_DISTRIBUTION.md §C1.
+#   2. Rename this file to `ios-adhoc.yml`.
+# It is `workflow_dispatch` only — you trigger it from the Actions tab, it does not
+# run on push.
+#
+# It mirrors android-build.yml's philosophy (repo holds src/ + native modules, NOT
+# the generated RN shell — CI generates a pristine shell and overlays our code),
+# on a macOS runner. iOS code signing is the fiddliest part of the whole project;
+# expect to iterate on the archive/export steps the first few runs. Get Path A
+# (Xcode Archive by hand, docs/IOS_DISTRIBUTION.md) working FIRST — this just
+# automates the same archive + export you did there.
+
+name: iOS Ad Hoc IPA
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUNDLE_ID: com.aurabridge.app
+  RN_VERSION: '0.74.5'
+
+jobs:
+  build:
+    runs-on: macos-14 # Apple Silicon runner with current Xcode
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Pure-logic tests (must pass before we spend macOS minutes)
+        run: |
+          set -eux
+          npm install
+          npm test
+
+      - name: Generate RN iOS shell
+        run: |
+          set -eux
+          npx --yes @react-native-community/cli@13.6.9 init AuraBridge \
+            --version "$RN_VERSION" --directory shell --skip-install --skip-git-init --pm npm
+
+      - name: Overlay app source + native Swift modules
+        run: |
+          set -eux
+          rm -f shell/App.tsx
+          rm -rf shell/__tests__
+          cp -R src shell/src
+          cp index.js app.json babel.config.js metro.config.js shell/
+          # Swift/ObjC native modules go next to the generated app sources.
+          cp ios/AuraBridge/BlePeripheral.swift ios/AuraBridge/BlePeripheral.m \
+             ios/AuraBridge/Heading.swift ios/AuraBridge/Heading.m \
+             ios/AuraBridge/Sound.swift ios/AuraBridge/Sound.m \
+             ios/AuraBridge/AuraBridge-Bridging-Header.h \
+             shell/ios/AuraBridge/
+
+      - name: Inject Firebase config from secrets
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+        run: node scripts/gen-firebase-config.js shell/src/lib/firebaseConfig.ts
+
+      - name: Install JS deps
+        working-directory: shell
+        run: |
+          set -eux
+          npm install
+          npm install --save \
+            react-native-ble-plx@^3.2.1 \
+            zustand@^4.5.4 \
+            react-native-vision-camera@4.5.3 \
+            firebase@^10.12.0 \
+            @react-native-async-storage/async-storage@^1.23.1 \
+            react-native-image-picker@^7.1.2
+
+      - name: Add Swift modules to the Xcode target + bridging header
+        working-directory: shell/ios
+        run: |
+          set -eux
+          gem install xcodeproj
+          # Register the native files with the AuraBridge target and point the
+          # SWIFT_OBJC_BRIDGING_HEADER build setting at our header. pbxproj editing
+          # is the brittle bit — inspect the log if a later archive can't find a
+          # module. (Alternative: commit a pre-edited project, but that defeats the
+          # "CI generates the shell" model.)
+          cat > /tmp/add_native.rb <<'RUBY'
+          require 'xcodeproj'
+          proj = Xcodeproj::Project.open('AuraBridge.xcodeproj')
+          target = proj.targets.find { |t| t.name == 'AuraBridge' }
+          group = proj.main_group['AuraBridge']
+          %w[BlePeripheral Heading Sound].each do |m|
+            ["#{m}.swift", "#{m}.m"].each do |f|
+              path = "AuraBridge/#{f}"
+              next unless File.exist?(path)
+              ref = group.new_reference(f)
+              target.add_file_references([ref]) if f.end_with?('.swift', '.m')
+            end
+          end
+          target.build_configurations.each do |c|
+            c.build_settings['SWIFT_OBJC_BRIDGING_HEADER'] = 'AuraBridge/AuraBridge-Bridging-Header.h'
+            c.build_settings['SWIFT_VERSION'] ||= '5.0'
+            c.build_settings['CLANG_ENABLE_MODULES'] = 'YES'
+          end
+          proj.save
+          RUBY
+          ruby /tmp/add_native.rb
+
+      - name: Add Info.plist usage strings
+        working-directory: shell/ios/AuraBridge
+        run: |
+          set -eux
+          PLIST=Info.plist
+          /usr/libexec/PlistBuddy -c "Add :NSBluetoothAlwaysUsageDescription string 'AuraBridge uses Bluetooth to find nearby people and form the bridge.'" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'AuraBridge shows the bridge over the live camera.'" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'Pick a profile photo from your library.'" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :NSLocationWhenInUseUsageDescription string 'Used for the compass heading (facing detection).'" "$PLIST" || true
+
+      - name: CocoaPods install
+        working-directory: shell/ios
+        run: pod install
+
+      - name: Import signing certificate + provisioning profile
+        env:
+          CERT_B64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+          CERT_PW: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          PROFILE_B64: ${{ secrets.IOS_ADHOC_PROFILE_BASE64 }}
+          KEYCHAIN_PW: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+        run: |
+          set -eu
+          # Decode secrets to temp files (never printed).
+          echo "$CERT_B64" | base64 --decode > /tmp/cert.p12
+          echo "$PROFILE_B64" | base64 --decode > /tmp/profile.mobileprovision
+          # Throwaway keychain so we never touch the runner's login keychain.
+          security create-keychain -p "$KEYCHAIN_PW" build.keychain
+          security set-keychain-settings -lut 21600 build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PW" build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$CERT_PW" -T /usr/bin/codesign
+          security list-keychains -d user -s build.keychain login.keychain
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PW" build.keychain
+          # Install the provisioning profile where Xcode looks for it.
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp /tmp/profile.mobileprovision "$HOME/Library/MobileDevice/Provisioning Profiles/"
+
+      - name: Archive
+        working-directory: shell/ios
+        env:
+          TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+        run: |
+          set -eux
+          xcodebuild -workspace AuraBridge.xcworkspace -scheme AuraBridge \
+            -configuration Release -archivePath "$RUNNER_TEMP/AuraBridge.xcarchive" \
+            -destination 'generic/platform=iOS' \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_STYLE=Manual \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            archive
+
+      - name: Export Ad Hoc IPA
+        working-directory: shell/ios
+        env:
+          TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+        run: |
+          set -eux
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>ad-hoc</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>compileBitcode</key><false/>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/AuraBridge.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurabridge-adhoc-ipa
+          path: ${{ runner.temp }}/export/*.ipa
+          if-no-files-found: error
