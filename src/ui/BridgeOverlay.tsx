@@ -47,6 +47,39 @@ function ReactionFloat({ reactionId }: { reactionId: number }): React.ReactEleme
   return <Animated.Text style={[styles.float, { opacity, transform: [{ translateY }, { scale }] }]}>{emoji}</Animated.Text>;
 }
 
+const PARTICLE_COUNT = 7;
+
+/**
+ * A single mote of light rising up the beam and fading out, looping forever with
+ * a per-index phase offset so the stream looks continuous rather than pulsed.
+ * Runs entirely on the native driver (transform + opacity only) — independent of
+ * the beam's JS-driven layout animations, so the two never share a value.
+ */
+function Particle({ index, hue }: { index: number; hue: string }): React.ReactElement {
+  const t = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const DURATION = 1700;
+    const anim = Animated.loop(
+      Animated.timing(t, { toValue: 1, duration: DURATION, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+    );
+    // Stagger each mote across the cycle so they don't all launch together.
+    const delay = (index / PARTICLE_COUNT) * DURATION;
+    const timer = setTimeout(() => anim.start(), delay);
+    return () => {
+      clearTimeout(timer);
+      anim.stop();
+    };
+  }, [t, index]);
+  const translateY = t.interpolate({ inputRange: [0, 1], outputRange: [0, -MAX_BEAM] });
+  const opacity = t.interpolate({ inputRange: [0, 0.1, 0.75, 1], outputRange: [0, 0.95, 0.5, 0] });
+  const scale = t.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.6, 1, 0.4] });
+  return (
+    <Animated.View
+      style={[styles.particle, { backgroundColor: hue, shadowColor: hue, opacity, transform: [{ translateY }, { scale }] }]}
+    />
+  );
+}
+
 function Beam({
   bond,
   reactions,
@@ -107,10 +140,19 @@ function Beam({
   const beamHeight = strength.interpolate({ inputRange: [0, 1], outputRange: [22, MAX_BEAM] });
   const beamWidth = strength.interpolate({ inputRange: [0, 1], outputRange: [6, 22] });
   const beamOpacity = strength.interpolate({ inputRange: [0, 1], outputRange: [0.16, 0.95] });
+  const coreWidth = strength.interpolate({ inputRange: [0, 1], outputRange: [2, 7] });
+  const coreOpacity = strength.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] });
+  const particleDim = strength.interpolate({ inputRange: [0, 1], outputRange: [0.2, 1] });
   const reticleOpacity = strength.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] });
   const reticleScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.28] });
+  // Breathing halo behind the reticle.
+  const haloScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1.15, 1.6] });
+  const haloOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.42, 0.14] });
   const burstScale = burst.interpolate({ inputRange: [0, 1], outputRange: [0.3, 2.8] });
   const burstOpacity = burst.interpolate({ inputRange: [0, 1], outputRange: [0.9, 0] });
+  // Bright radial flash at the moment of formation.
+  const flashScale = burst.interpolate({ inputRange: [0, 1], outputRange: [0.2, 3.4] });
+  const flashOpacity = burst.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.7, 0.28, 0] });
 
   return (
     <View style={styles.beamItem} pointerEvents="box-none">
@@ -119,6 +161,14 @@ function Beam({
         {reactions.map((r) => (
           <ReactionFloat key={r.key} reactionId={r.reactionId} />
         ))}
+        {/* Bright radial flash at the instant of formation (behind everything). */}
+        <Animated.View
+          style={[styles.flash, { backgroundColor: hue, shadowColor: hue, opacity: flashOpacity, transform: [{ scale: flashScale }] }]}
+        />
+        {/* Soft breathing halo behind the reticle while bonded. */}
+        <Animated.View
+          style={[styles.halo, { backgroundColor: hue, opacity: haloOpacity, transform: [{ scale: haloScale }] }]}
+        />
         <Animated.View
           style={[styles.burst, { borderColor: hue, opacity: burstOpacity, transform: [{ scale: burstScale }] }]}
         />
@@ -141,7 +191,16 @@ function Beam({
       ) : null}
       <Animated.View
         style={[styles.beam, { width: beamWidth, height: beamHeight, opacity: beamOpacity, backgroundColor: hue, shadowColor: hue }]}
-      />
+      >
+        {/* A hot white core down the centre of the beam, brightening with strength. */}
+        <Animated.View style={[styles.beamCore, { width: coreWidth, opacity: coreOpacity }]} />
+        {/* Energy motes flowing up the beam; dimmed when the bond is weak. */}
+        <Animated.View style={[styles.particleLayer, { opacity: particleDim }]} pointerEvents="none">
+          {Array.from({ length: PARTICLE_COUNT }, (_, i) => (
+            <Particle key={i} index={i} hue={hue} />
+          ))}
+        </Animated.View>
+      </Animated.View>
     </View>
   );
 }
@@ -285,12 +344,52 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
   },
   burst: { position: 'absolute', width: 48, height: 48, borderRadius: 24, borderWidth: 3 },
+  halo: {
+    position: 'absolute',
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+  },
+  flash: {
+    position: 'absolute',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    shadowOpacity: 1,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 0 },
+  },
   beam: {
     borderRadius: 12,
     shadowOpacity: 0.9,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 0 },
     elevation: 10,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+  },
+  beamCore: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    borderRadius: 6,
+    backgroundColor: '#ffffff',
+  },
+  particleLayer: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  particle: {
+    position: 'absolute',
+    bottom: 4,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    shadowOpacity: 0.9,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 0 },
   },
   statusWrap: { position: 'absolute', left: 0, right: 0, top: 64, alignItems: 'center' },
   status: { color: '#e6f1ff', fontSize: 18, fontWeight: '700', letterSpacing: 2 },
