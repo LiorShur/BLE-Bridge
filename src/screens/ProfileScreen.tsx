@@ -14,7 +14,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, Pressable, Image, StyleSheet, ActivityIndicator } from 'react-native';
 import { launchCamera, launchImageLibrary, type Asset } from 'react-native-image-picker';
 import { useStore } from '../state/store';
-import { saveProfile, uploadProfilePhoto } from '../lib/profiles';
+import { saveProfile, uploadProfilePhoto, ensureSignedIn } from '../lib/profiles';
 import { saveMyProfileLocal } from '../identity/persistentId';
 
 export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactElement {
@@ -65,6 +65,11 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
     setError(null);
     const finalName = name.trim();
 
+    // Whether anonymous auth actually signed us in. If not, every cloud write is
+    // denied (rules require auth) — the usual cause is the Anonymous provider
+    // being disabled in Firebase. Surfacing this makes the failure diagnosable.
+    const signedIn = await ensureSignedIn();
+
     // Resolve the photo, but NEVER let a photo failure block saving the name.
     let finalPhoto: string | null = trimmedPhoto || null;
     let photoError: string | null = null;
@@ -80,12 +85,15 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
     if (finalName) nameOk = await saveProfile(localPeerId, { name: finalName, photoURL: finalPhoto });
     setSaving(false);
 
-    if (photoError) {
-      setError(`Photo upload failed (${photoError}). Your name was saved — retry the photo or continue without it.`);
-      return;
-    }
-    if (!nameOk) {
-      setError("Couldn't save your name to the cloud — check connection and retry, or continue anyway.");
+    if (photoError || !nameOk) {
+      const hint = !signedIn
+        ? ' Not signed in to Firebase — enable Anonymous sign-in (Authentication → Sign-in method).'
+        : '';
+      const parts: string[] = [];
+      if (!nameOk) parts.push('Name save failed.');
+      else parts.push('Name saved.');
+      if (photoError) parts.push(`Photo upload failed (${photoError}).`);
+      setError(`${parts.join(' ')}${hint} Retry or continue.`);
       return;
     }
     if (finalPhoto) {

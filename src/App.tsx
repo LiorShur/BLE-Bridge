@@ -47,9 +47,10 @@ function MainExperience(): React.ReactElement {
     <View style={styles.fill}>
       <CameraBridge />
       <ReactionBar />
-      <DebugHUD />
-      {/* Hidden HUD toggle (P4-6): long-press the top-right corner. */}
+      {/* Hidden HUD toggle (P4-6): long-press the top-right corner. Rendered
+          BEFORE the HUD so the HUD's modal overlay sits above it when open. */}
       <Pressable style={styles.hudTap} onLongPress={toggleHud} delayLongPress={600} />
+      <DebugHUD />
     </View>
   );
 }

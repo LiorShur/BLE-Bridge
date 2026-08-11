@@ -43,6 +43,22 @@ export function profilesEnabled(): boolean {
   return isFirebaseConfigured();
 }
 
+/**
+ * Resolve once anonymous auth has settled, returning whether we actually have a
+ * signed-in user. If this is false, every Firestore/Storage WRITE will be denied
+ * (rules require request.auth != null) — the usual cause is the Anonymous
+ * sign-in provider not being enabled in the Firebase console.
+ */
+export async function ensureSignedIn(): Promise<boolean> {
+  if (!ensureInit()) return false;
+  try {
+    if (authReady) await authReady;
+  } catch {
+    /* ignore */
+  }
+  return !!auth?.currentUser;
+}
+
 function ensureInit(): boolean {
   if (!isFirebaseConfigured()) return false;
   if (app) return true;

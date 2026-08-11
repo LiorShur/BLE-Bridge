@@ -131,6 +131,7 @@ function TxPowerSlider(): React.ReactElement {
 
 export function DebugHUD(): React.ReactElement | null {
   const visible = useStore((s) => s.hudVisible);
+  const toggleHud = useStore((s) => s.toggleHud);
   const localPeerId = useStore((s) => s.localPeerId);
   const localTxPower = useStore((s) => s.localTxPower);
   const headingDeg = useStore((s) => s.localHeadingDeg);
@@ -148,7 +149,15 @@ export function DebugHUD(): React.ReactElement | null {
   if (!visible) return null;
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    // Full-screen modal: the backdrop captures touches (so the camera underneath
+    // can't swallow them — the cause of the "HUD opens but is dead" trap on some
+    // EMUI devices) and dismisses on tap-outside. The panel sits on top.
+    <View style={styles.overlay}>
+      <Pressable style={styles.backdrop} onPress={toggleHud} />
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <Pressable style={styles.closeBtn} onPress={toggleHud}>
+        <Text style={styles.closeTxt}>✕ Close</Text>
+      </Pressable>
       <Text style={styles.h}>LOCAL</Text>
       <Row label="model" value={DEVICE_MODEL} />
       <Row label="peerId" value={`0x${localPeerId.toString(16).padStart(8, '0')}`} />
@@ -204,18 +213,30 @@ export function DebugHUD(): React.ReactElement | null {
       <TunableSlider label="align floor" k="alignFloor" min={0} max={1} step={0.05} />
       <TunableSlider label="form >" k="formThreshold" min={0.3} max={0.9} step={0.05} />
       <TunableSlider label="break <" k="breakThreshold" min={0.1} max={0.6} step={0.05} />
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.45)' },
+  closeBtn: {
+    alignSelf: 'flex-end',
+    backgroundColor: 'rgba(124,249,255,0.16)',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginBottom: 4,
+  },
+  closeTxt: { color: '#7cf9ff', fontSize: 13, fontWeight: '700' },
   container: {
     position: 'absolute',
     top: 40,
     left: 8,
     right: 8,
-    maxHeight: '70%',
-    backgroundColor: 'rgba(6,10,26,0.85)',
+    maxHeight: '80%',
+    backgroundColor: 'rgba(6,10,26,0.96)',
     borderRadius: 10,
     padding: 10,
   },
