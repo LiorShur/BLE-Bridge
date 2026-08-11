@@ -21,6 +21,7 @@ import type { BondState } from '../signal/bond';
 /** Bottom bar of reaction buttons — only shown while bonded to at least one peer. */
 export function ReactionBar(): React.ReactElement | null {
   const bonds = useStore((s) => s.bonds);
+  const profiles = useStore((s) => s.profiles);
   const sendReaction = useStore((s) => s.sendReaction);
 
   // Bonded peers, strongest first (bonds is already sorted by the engine).
@@ -62,6 +63,8 @@ export function ReactionBar(): React.ReactElement | null {
             const peerId = b.peer!.peerId;
             const hue = hueByteToHex(b.peer!.hue);
             const active = peerId === activeId;
+            const prof = profiles[peerId >>> 0];
+            const label = prof?.status === 'loaded' && prof.name ? prof.name : shortPeerTag(peerId);
             return (
               <Pressable
                 key={peerId}
@@ -69,7 +72,7 @@ export function ReactionBar(): React.ReactElement | null {
                 style={[styles.target, active && { borderColor: hue, backgroundColor: 'rgba(124,249,255,0.14)' }]}
               >
                 <View style={[styles.targetDot, { backgroundColor: hue }]} />
-                <Text style={[styles.targetText, active && styles.targetTextActive]}>{shortPeerTag(peerId)}</Text>
+                <Text style={[styles.targetText, active && styles.targetTextActive]} numberOfLines={1}>{label}</Text>
               </Pressable>
             );
           })}

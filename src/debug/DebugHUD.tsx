@@ -12,7 +12,7 @@
  * NOTE: depends on React Native; not testable off-device.
  */
 import React, { useRef } from 'react';
-import { View, Text, Pressable, ScrollView, StyleSheet, Platform, PanResponder, type GestureResponderEvent } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, StyleSheet, Platform, PanResponder, type GestureResponderEvent } from 'react-native';
 import { useStore, type Tunables } from '../state/store';
 import { useNearbyPeers } from '../ble/useNearbyPeers';
 
@@ -143,15 +143,17 @@ export function DebugHUD(): React.ReactElement | null {
   const gattEnabled = useStore((s) => s.gattEnabled);
   const setGattEnabled = useStore((s) => s.setGattEnabled);
   const gattStatus = useStore((s) => s.gattStatus);
+  const gattError = useStore((s) => s.gattError);
   const peerTransports = useStore((s) => s.peerTransports);
   const peers = useNearbyPeers();
 
   if (!visible) return null;
 
   return (
-    // Full-screen modal: the backdrop captures touches (so the camera underneath
-    // can't swallow them — the cause of the "HUD opens but is dead" trap on some
-    // EMUI devices) and dismisses on tap-outside. The panel sits on top.
+    // Rendered in an RN <Modal> — its own native window ABOVE the camera
+    // SurfaceView, so touches always land here (the floating-panel version was
+    // touch-dead on some EMUI devices). Backdrop dismisses on tap-outside.
+    <Modal visible transparent animationType="fade" onRequestClose={toggleHud} statusBarTranslucent>
     <View style={styles.overlay}>
       <Pressable style={styles.backdrop} onPress={toggleHud} />
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -178,6 +180,7 @@ export function DebugHUD(): React.ReactElement | null {
         <>
           <Row label="server" value={gattStatus.serverRunning ? `running · ${gattStatus.subscribers} subs` : 'starting…'} />
           <Row label="connections" value={String(gattStatus.connections)} />
+          {gattError ? <Row label="last error" value={gattError} /> : null}
         </>
       ) : null}
 
@@ -215,6 +218,7 @@ export function DebugHUD(): React.ReactElement | null {
       <TunableSlider label="break <" k="breakThreshold" min={0.1} max={0.6} step={0.05} />
       </ScrollView>
     </View>
+    </Modal>
   );
 }
 

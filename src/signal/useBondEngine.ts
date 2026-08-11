@@ -144,11 +144,17 @@ export function useBondEngine(
       handleReactionsAndAcks(obs.payload, eo.peerId, next.machine.bonded);
     };
 
+    const onGattErr = (err: Error): void => {
+      // Surface GATT connect failures separately from scan errors so the HUD can
+      // show why the interop path isn't connecting (common on old radios).
+      useStore.getState().setGattError(err.message || 'gatt error');
+    };
+
     const onAdvObs = (obs: ScanObservation): void => {
       ingest(obs, 'adv');
       // Interop: dial peers we should be central for (lower peerId dials).
       if (gatt && shouldInitiateConnection(localPeerId, obs.payload.peerId)) {
-        gatt.ensureConnected(obs.deviceId, obs.payload.peerId, (g) => ingest(g, 'gatt'), onErr);
+        gatt.ensureConnected(obs.deviceId, obs.payload.peerId, (g) => ingest(g, 'gatt'), onGattErr);
       }
     };
 

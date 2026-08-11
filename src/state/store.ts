@@ -131,6 +131,10 @@ export interface AppState {
   peerTransports: Record<number, 'adv' | 'gatt'>;
   /** GATT server/central status for the HUD. */
   gattStatus: { serverRunning: boolean; subscribers: number; connections: number };
+  /** Last GATT connection error, for diagnosing the interop path. */
+  gattError: string | null;
+  /** Peer whose enlarged profile card is open (tap a beam chip), or null. */
+  expandedPeerId: number | null;
   /** Peer profiles fetched on bond, keyed by peerId. */
   profiles: Record<number, ProfileEntry>;
   /** The local user's own display name (null = not set yet). */
@@ -160,6 +164,10 @@ export interface AppState {
   setPeerTransports: (map: Record<number, 'adv' | 'gatt'>) => void;
   /** Update GATT status fields for the HUD. */
   setGattStatus: (status: Partial<AppState['gattStatus']>) => void;
+  /** Record the last GATT connection error (null clears it). */
+  setGattError: (error: string | null) => void;
+  /** Open/close the enlarged profile card for a peer. */
+  setExpandedPeer: (peerId: number | null) => void;
   /** Start broadcasting a reaction toward a peer (fresh nonce each call). */
   sendReaction: (targetPeerId: number, reactionId: number) => void;
   /** Stop broadcasting the current outgoing reaction. */
@@ -195,6 +203,8 @@ export const useStore = create<AppState>((set) => {
     gattEnabled: GATT_ENABLED,
     peerTransports: {},
     gattStatus: { serverRunning: false, subscribers: 0, connections: 0 },
+    gattError: null,
+    expandedPeerId: null,
     outgoingReaction: null,
     outgoingAck: null,
     recentSentNonces: [],
@@ -218,6 +228,8 @@ export const useStore = create<AppState>((set) => {
     setGattEnabled: (enabled) => set({ gattEnabled: enabled }),
     setPeerTransports: (map) => set({ peerTransports: map }),
     setGattStatus: (status) => set((s) => ({ gattStatus: { ...s.gattStatus, ...status } })),
+    setGattError: (error) => set({ gattError: error }),
+    setExpandedPeer: (peerId) => set({ expandedPeerId: peerId }),
     sendReaction: (targetPeerId, reactionId) =>
       set((s) => {
         const nonce = ((s.outgoingReaction?.nonce ?? s.recentSentNonces[s.recentSentNonces.length - 1] ?? 0) % 255) + 1;

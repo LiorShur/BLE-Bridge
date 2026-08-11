@@ -14,7 +14,7 @@
  * NOTE: depends on React Native; not part of the pure-logic test suite.
  */
 import React, { useEffect, useRef } from 'react';
-import { View, Text, Image, Animated, Easing, Vibration, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, Image, Pressable, Modal, Animated, Easing, Vibration, StyleSheet, Dimensions } from 'react-native';
 import { useStore } from '../state/store';
 import { hueByteToHex } from '../ar/effects';
 import { Sound } from '../audio/sound';
@@ -113,8 +113,8 @@ function Beam({
   const burstOpacity = burst.interpolate({ inputRange: [0, 1], outputRange: [0.9, 0] });
 
   return (
-    <View style={styles.beamItem}>
-      <View style={styles.reticleHolder}>
+    <View style={styles.beamItem} pointerEvents="box-none">
+      <View style={styles.reticleHolder} pointerEvents="box-none">
         {/* Received reactions float up from this specific peer's reticle. */}
         {reactions.map((r) => (
           <ReactionFloat key={r.key} reactionId={r.reactionId} />
@@ -126,9 +126,9 @@ function Beam({
           style={[styles.reticle, { borderColor: hue, shadowColor: hue, opacity: reticleOpacity, transform: [{ scale: reticleScale }] }]}
         />
       </View>
-      {/* Identity chip: the peer's profile name/photo once known, else hue + #TAG. */}
+      {/* Identity chip: tap to enlarge. Profile name/photo once known, else hue + #TAG. */}
       {bond.peer ? (
-        <View style={styles.chip}>
+        <Pressable style={styles.chip} onPress={() => useStore.getState().setExpandedPeer(bond.peer!.peerId)}>
           {profile?.status === 'loaded' && profile.photoURL ? (
             <Image source={{ uri: profile.photoURL }} style={[styles.chipAvatar, { borderColor: hue }]} />
           ) : (
@@ -137,7 +137,7 @@ function Beam({
           <Text style={styles.chipText} numberOfLines={1}>
             {profile?.status === 'loaded' && profile.name ? profile.name : shortPeerTag(bond.peer.peerId)}
           </Text>
-        </View>
+        </Pressable>
       ) : null}
       <Animated.View
         style={[styles.beam, { width: beamWidth, height: beamHeight, opacity: beamOpacity, backgroundColor: hue, shadowColor: hue }]}
@@ -175,8 +175,10 @@ export function BridgeOverlay(): React.ReactElement {
   const showTurnHint = primary?.peer != null && primary.peer.heading !== null && primary.alignment < 0.7 && !primary.bonded;
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      <View style={styles.beamRow}>
+    // box-none: only the tappable identity chips capture touches; beams/status
+    // pass through. The rest of the screen stays interactive.
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+      <View style={styles.beamRow} pointerEvents="box-none">
         {list.map((b) => (
           <Beam
             key={b.peer?.peerId ?? Math.random()}
@@ -187,14 +189,48 @@ export function BridgeOverlay(): React.ReactElement {
         ))}
       </View>
 
-      <View style={styles.statusWrap}>
+      <View style={styles.statusWrap} pointerEvents="none">
         <Text style={[styles.status, primary?.bonded && primary.peer ? { color: hueByteToHex(primary.peer.hue) } : null]}>
           {statusLabel(primary)}
         </Text>
         {list.length > 1 ? <Text style={styles.sub}>{list.length} nearby</Text> : null}
         {showTurnHint ? <Text style={styles.hint}>turn to face each other</Text> : null}
       </View>
+
+      <ProfileCard />
     </View>
+  );
+}
+
+/** Enlarged profile card shown when a beam's identity chip is tapped. */
+function ProfileCard(): React.ReactElement | null {
+  const expandedPeerId = useStore((s) => s.expandedPeerId);
+  const profiles = useStore((s) => s.profiles);
+  const bonds = useStore((s) => s.bonds);
+  const setExpandedPeer = useStore((s) => s.setExpandedPeer);
+  if (expandedPeerId == null) return null;
+
+  const bond = bonds.find((b) => b.peer?.peerId === expandedPeerId);
+  const hue = bond?.peer ? hueByteToHex(bond.peer.hue) : '#7cf9ff';
+  const profile = profiles[expandedPeerId >>> 0];
+  const name = profile?.status === 'loaded' && profile.name ? profile.name : shortPeerTag(expandedPeerId);
+  const photoURL = profile?.status === 'loaded' ? profile.photoURL : null;
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={() => setExpandedPeer(null)} statusBarTranslucent>
+      <Pressable style={styles.cardBackdrop} onPress={() => setExpandedPeer(null)}>
+        <View style={[styles.card, { borderColor: hue }]}>
+          {photoURL ? (
+            <Image source={{ uri: photoURL }} style={[styles.cardPhoto, { borderColor: hue }]} />
+          ) : (
+            <View style={[styles.cardPhoto, styles.cardPhotoEmpty, { borderColor: hue, backgroundColor: hue }]} />
+          )}
+          <Text style={styles.cardName}>{name}</Text>
+          <Text style={styles.cardTag}>{shortPeerTag(expandedPeerId)}</Text>
+          <Text style={styles.cardHint}>tap anywhere to close</Text>
+        </View>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -223,6 +259,21 @@ const styles = StyleSheet.create({
   chipDot: { width: 8, height: 8, borderRadius: 4, marginRight: 5 },
   chipAvatar: { width: 18, height: 18, borderRadius: 9, marginRight: 6, borderWidth: 1, backgroundColor: '#0d1530' },
   chipText: { color: '#cfe0f5', fontSize: 11, fontWeight: '600', letterSpacing: 0.5, maxWidth: 96 },
+  cardBackdrop: { flex: 1, backgroundColor: 'rgba(4,6,16,0.8)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  card: {
+    backgroundColor: 'rgba(18,26,52,0.98)',
+    borderRadius: 20,
+    borderWidth: 2,
+    paddingVertical: 28,
+    paddingHorizontal: 32,
+    alignItems: 'center',
+    maxWidth: 340,
+  },
+  cardPhoto: { width: 200, height: 200, borderRadius: 100, borderWidth: 3, backgroundColor: '#0d1530' },
+  cardPhotoEmpty: { opacity: 0.85 },
+  cardName: { color: '#e6f1ff', fontSize: 24, fontWeight: '700', marginTop: 18 },
+  cardTag: { color: '#9fb3c8', fontSize: 14, marginTop: 4, letterSpacing: 1 },
+  cardHint: { color: '#5b6b82', fontSize: 12, marginTop: 18 },
   reticle: {
     position: 'absolute',
     width: 40,

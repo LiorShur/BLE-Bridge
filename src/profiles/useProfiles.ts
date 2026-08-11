@@ -23,7 +23,10 @@ export function useProfiles(): void {
     const now = Date.now();
     const RETRY_MISSING_MS = 20000; // re-check a peer who set their name late
     for (const b of bonds) {
-      if (!b.bonded || !b.peer) continue;
+      // Fetch for ANY detected peer (has a beam), not only bonded ones — else a
+      // peer that shows up but hasn't crossed the bond threshold stays stuck on
+      // its #TAG forever.
+      if (!b.peer) continue;
       const peerId = b.peer.peerId >>> 0;
       const existing = profiles[peerId];
       // Skip if loaded, currently loading, or missing-but-recently-tried.
