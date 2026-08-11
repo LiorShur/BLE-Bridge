@@ -26,6 +26,7 @@ import { isSupported, type SupportReport } from './ble/advertiser';
 import { useStore } from './state/store';
 import { useCompassHeading } from './sensors/useCompassHeading';
 import { useAdvertiser } from './ble/useAdvertiser';
+import { useIosPeripheral } from './ble/useIosPeripheral';
 import { useBondEngine } from './signal/useBondEngine';
 import { useProfiles } from './profiles/useProfiles';
 import { loadOrCreatePeerId, loadMyProfile } from './identity/persistentId';
@@ -41,6 +42,9 @@ function MainExperience(): React.ReactElement {
   // bonds to interop-enabled Androids it connects to.
   useCompassHeading();
   useAdvertiser(Platform.OS !== 'ios', gattEnabled);
+  // iOS peripheral (P-i2b): advertise the service UUID + serve the payload over
+  // GATT so Android can discover the iPhone. No-op until the Swift module is added.
+  useIosPeripheral(Platform.OS === 'ios');
   useBondEngine(true, gattEnabled);
   useProfiles();
 

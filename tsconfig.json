@@ -35,6 +35,8 @@
     "src/identity",
     "src/profiles",
     "src/ble/gatt/gattServer.ts",
-    "src/ble/gatt/gattClient.ts"
+    "src/ble/gatt/gattClient.ts",
+    "src/ble/gatt/iosPeripheral.ts",
+    "src/ble/useIosPeripheral.ts"
   ]
 }
