@@ -6,10 +6,19 @@
  * the derived primary {@link BondState} and per-peer debug rows into the store.
  * All the actual math lives in the pure, tested engine — this file only pumps it.
  *
+ * Interop (GATT) path: when enabled, the SAME scan discovers connectable peers
+ * (they advertise the service UUID in their scan response); for peers this device
+ * should dial (role tie-break), a GATT connection is opened and its payload
+ * notifications feed the very same engine — so a GATT peer and an advertised peer
+ * are indistinguishable downstream. No second scan is started.
+ *
  * NOTE: depends on React Native; not part of the pure-logic test suite.
  */
 import { useEffect, useRef } from 'react';
+import { BleManager } from 'react-native-ble-plx';
 import { BleScanner, type ScanObservation } from '../ble/scanner';
+import { GattClient } from '../ble/gatt/gattClient';
+import { shouldInitiateConnection } from '../ble/gatt/constants';
 import { useStore } from '../state/store';
 import { Sound } from '../audio/sound';
 import {
@@ -65,20 +74,32 @@ function toEngineObservation(obs: ScanObservation): EngineObservation {
 const SCAN_SILENCE_MS = 12000;
 const SCAN_RESTART_COOLDOWN_MS = 20000;
 
-export function useBondEngine(enabled: boolean, onScanError?: (e: Error) => void): void {
+export function useBondEngine(
+  enabled: boolean,
+  gattEnabled: boolean,
+  onScanError?: (e: Error) => void,
+): void {
   const peers = useRef<Map<number, PeerEngineState>>(new Map());
+  const managerRef = useRef<BleManager | null>(null);
   const scannerRef = useRef<BleScanner | null>(null);
+  const gattRef = useRef<GattClient | null>(null);
   const lastObsAt = useRef(0);
   const lastScanStartAt = useRef(0);
   const scanErrorRef = useRef<string | null>(null);
   const lastReactionNonceByPeer = useRef<Map<number, number>>(new Map());
   const lastAckNonceByPeer = useRef<Map<number, number>>(new Map());
+  // Transport the last observation for each peer arrived over.
+  const transportByPeer = useRef<Map<number, 'adv' | 'gatt'>>(new Map());
 
   useEffect(() => {
     if (!enabled) return;
 
-    const scanner = new BleScanner();
+    const manager = new BleManager();
+    managerRef.current = manager;
+    const scanner = new BleScanner(manager);
     scannerRef.current = scanner;
+    const gatt = gattEnabled ? new GattClient(manager) : null;
+    gattRef.current = gatt;
     const localPeerId = useStore.getState().localPeerId;
 
     const local = () => {
@@ -86,44 +107,52 @@ export function useBondEngine(enabled: boolean, onScanError?: (e: Error) => void
       return { headingDeg: s.localHeadingDeg, accuracy: s.localHeadingAccuracy };
     };
 
-    const onObs = (obs: ScanObservation): void => {
+    // Reactions/acks addressed to us, folded from either transport's payload.
+    const handleReactionsAndAcks = (p: ScanObservation['payload'], peerId: number, bonded: boolean): void => {
+      if (p.reactionId !== 0 && p.reactionTarget === localPeerId && bonded) {
+        if (lastReactionNonceByPeer.current.get(peerId) !== p.reactionNonce) {
+          lastReactionNonceByPeer.current.set(peerId, p.reactionNonce);
+          useStore.getState().pushIncomingReaction(peerId, p.reactionId, p.reactionNonce);
+        }
+      }
+      if (p.ackTarget === localPeerId && p.ackNonce !== 0) {
+        if (lastAckNonceByPeer.current.get(peerId) !== p.ackNonce) {
+          lastAckNonceByPeer.current.set(peerId, p.ackNonce);
+          if (useStore.getState().recentSentNonces.includes(p.ackNonce)) Sound.delivered();
+        }
+      }
+    };
+
+    // Shared ingest for BOTH transports — the engine can't tell them apart.
+    const ingest = (obs: ScanObservation, transport: 'adv' | 'gatt'): void => {
       lastObsAt.current = obs.timestamp;
       if (scanErrorRef.current !== null) {
         scanErrorRef.current = null;
-        useStore.getState().setScanError(null); // results flowing again
+        useStore.getState().setScanError(null);
       }
-
       const eo = toEngineObservation(obs);
       const prev = peers.current.get(eo.peerId) ?? initPeerEngine(eo.peerId);
       const next = ingestObservation(prev, eo, local(), tunablesFromStore());
       peers.current.set(eo.peerId, next);
 
-      const p = obs.payload;
-
-      // Reaction addressed to us? Fire once per fresh nonce from that sender —
-      // but only while actually bonded to them, so a stray broadcast during
-      // "forming" can't pop an emoji before the bridge is real.
-      if (p.reactionId !== 0 && p.reactionTarget === localPeerId && next.machine.bonded) {
-        if (lastReactionNonceByPeer.current.get(p.peerId) !== p.reactionNonce) {
-          lastReactionNonceByPeer.current.set(p.peerId, p.reactionNonce);
-          useStore.getState().pushIncomingReaction(p.peerId, p.reactionId, p.reactionNonce);
-        }
+      // A GATT-connected peer stays labelled 'gatt' even though its advertisement
+      // still arrives — so the HUD shows the connection is doing the work.
+      if (transport === 'gatt' || !(gatt?.isConnected(eo.peerId))) {
+        transportByPeer.current.set(eo.peerId, transport);
       }
 
-      // Delivery ack addressed to us? If it confirms a reaction we recently
-      // sent, play the "delivered" cue once per fresh ack from that peer.
-      if (p.ackTarget === localPeerId && p.ackNonce !== 0) {
-        if (lastAckNonceByPeer.current.get(p.peerId) !== p.ackNonce) {
-          lastAckNonceByPeer.current.set(p.peerId, p.ackNonce);
-          if (useStore.getState().recentSentNonces.includes(p.ackNonce)) {
-            Sound.delivered();
-          }
-        }
+      handleReactionsAndAcks(obs.payload, eo.peerId, next.machine.bonded);
+    };
+
+    const onAdvObs = (obs: ScanObservation): void => {
+      ingest(obs, 'adv');
+      // Interop: dial peers we should be central for (lower peerId dials).
+      if (gatt && shouldInitiateConnection(localPeerId, obs.payload.peerId)) {
+        gatt.ensureConnected(obs.deviceId, obs.payload.peerId, (g) => ingest(g, 'gatt'), onErr);
       }
     };
+
     const onErr = (err: Error): void => {
-      // Surface the reason (ble-plx reports e.g. location-services-disabled) and
-      // let the silence check below restart the scan after the cooldown.
       const msg = err.message || 'scan error';
       if (scanErrorRef.current !== msg) {
         scanErrorRef.current = msg;
@@ -134,8 +163,8 @@ export function useBondEngine(enabled: boolean, onScanError?: (e: Error) => void
 
     const startScan = (now: number): void => {
       lastScanStartAt.current = now;
-      lastObsAt.current = now; // grace period before the silence check can fire
-      scanner.start(onObs, onErr);
+      lastObsAt.current = now;
+      scanner.start(onAdvObs, onErr);
     };
 
     startScan(Date.now());
@@ -144,8 +173,12 @@ export function useBondEngine(enabled: boolean, onScanError?: (e: Error) => void
       const t = tunablesFromStore();
       for (const [id, state] of peers.current) {
         const ticked = tickPeer(state, now, t);
-        if (isRemoved(ticked)) peers.current.delete(id);
-        else peers.current.set(id, ticked);
+        if (isRemoved(ticked)) {
+          peers.current.delete(id);
+          transportByPeer.current.delete(id);
+        } else {
+          peers.current.set(id, ticked);
+        }
       }
       const store = useStore.getState();
       const values = [...peers.current.values()];
@@ -153,7 +186,13 @@ export function useBondEngine(enabled: boolean, onScanError?: (e: Error) => void
       store.setBonds(selectAllBonds(values));
       store.setPeerRows(values.map((s) => toDebugRow(s, now)));
 
-      // Supervisor: restart a scan that has gone silent (throttle-safe).
+      if (gatt) {
+        const map: Record<number, 'adv' | 'gatt'> = {};
+        for (const [id, tr] of transportByPeer.current) map[id] = tr;
+        store.setPeerTransports(map);
+        store.setGattStatus({ connections: gatt.activeCount() });
+      }
+
       if (now - lastObsAt.current > SCAN_SILENCE_MS && now - lastScanStartAt.current > SCAN_RESTART_COOLDOWN_MS) {
         scanner.stop();
         startScan(now);
@@ -164,9 +203,14 @@ export function useBondEngine(enabled: boolean, onScanError?: (e: Error) => void
 
     return () => {
       clearInterval(interval);
-      scanner.destroy();
+      gatt?.stop();
+      scanner.stop();
+      manager.destroy();
+      managerRef.current = null;
       scannerRef.current = null;
+      gattRef.current = null;
       peers.current.clear();
+      transportByPeer.current.clear();
     };
-  }, [enabled, onScanError]);
+  }, [enabled, gattEnabled, onScanError]);
 }

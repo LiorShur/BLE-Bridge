@@ -24,6 +24,12 @@ export interface ScanObservation {
   rssi: number;
   /** Monotonic-ish receive timestamp (ms). */
   timestamp: number;
+  /**
+   * ble-plx device id (MAC on Android) for THIS sighting. Randomises ~every
+   * 15 min, so it is NEVER identity (that's payload.peerId) — but it is the
+   * handle the GATT interop path needs to connect. Empty string if unavailable.
+   */
+  deviceId: string;
 }
 
 export type ScanObserver = (obs: ScanObservation) => void;
@@ -77,6 +83,7 @@ export class BleScanner {
       headingDeg: headingToDegrees(payload.headingDecideg),
       rssi: device.rssi,
       timestamp,
+      deviceId: device.id ?? '',
     };
   }
 

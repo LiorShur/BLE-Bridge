@@ -34,11 +34,13 @@ type Phase = 'checking' | 'permsDenied' | 'capability' | 'onboarding' | 'profile
 
 function MainExperience(): React.ReactElement {
   const toggleHud = useStore((s) => s.toggleHud);
+  const gattEnabled = useStore((s) => s.gattEnabled);
 
-  // Mount the full signal stack exactly once.
+  // Mount the full signal stack. The advertiser and bond engine re-init when the
+  // GATT interop toggle flips (debug), so they pick up the new transport.
   useCompassHeading();
-  useAdvertiser(true);
-  useBondEngine(true);
+  useAdvertiser(true, gattEnabled);
+  useBondEngine(true, gattEnabled);
   useProfiles();
 
   return (

@@ -16,6 +16,7 @@ import { DEFAULT_ALPHA, DEFAULT_PATH_LOSS_N, D_NEAR, D_FAR } from '../signal/rss
 import { DEFAULT_TOLERANCE } from '../signal/alignment';
 import { DEFAULT_BOND_CONFIG } from '../signal/bond';
 import { DEFAULT_TX_POWER } from '../calibration';
+import { GATT_ENABLED } from '../config';
 
 /** On-device tunable constants (HUD sliders, TASKS.md P2-8). */
 export interface Tunables {
@@ -124,6 +125,12 @@ export interface AppState {
   recentSentNonces: number[];
   /** Recently received reactions to animate. */
   incomingReactions: IncomingReaction[];
+  /** Interop (GATT) path on/off — a debug toggle (docs/GATT_SPEC.md). */
+  gattEnabled: boolean;
+  /** Transport the last observation for each peer arrived over. */
+  peerTransports: Record<number, 'adv' | 'gatt'>;
+  /** GATT server/central status for the HUD. */
+  gattStatus: { serverRunning: boolean; subscribers: number; connections: number };
   /** Peer profiles fetched on bond, keyed by peerId. */
   profiles: Record<number, ProfileEntry>;
   /** The local user's own display name (null = not set yet). */
@@ -147,6 +154,12 @@ export interface AppState {
   setPeerRows: (rows: PeerDebugRow[]) => void;
   setAdvertiserStatus: (advertising: boolean, error: string | null) => void;
   setScanError: (error: string | null) => void;
+  /** Toggle the interop (GATT) path (debug). */
+  setGattEnabled: (enabled: boolean) => void;
+  /** Replace the per-peer transport map (written each publish tick). */
+  setPeerTransports: (map: Record<number, 'adv' | 'gatt'>) => void;
+  /** Update GATT status fields for the HUD. */
+  setGattStatus: (status: Partial<AppState['gattStatus']>) => void;
   /** Start broadcasting a reaction toward a peer (fresh nonce each call). */
   sendReaction: (targetPeerId: number, reactionId: number) => void;
   /** Stop broadcasting the current outgoing reaction. */
@@ -179,6 +192,9 @@ export const useStore = create<AppState>((set) => {
     advertising: false,
     advertiserError: null,
     scanError: null,
+    gattEnabled: GATT_ENABLED,
+    peerTransports: {},
+    gattStatus: { serverRunning: false, subscribers: 0, connections: 0 },
     outgoingReaction: null,
     outgoingAck: null,
     recentSentNonces: [],
@@ -199,6 +215,9 @@ export const useStore = create<AppState>((set) => {
     setPeerRows: (rows) => set({ peerRows: rows }),
     setAdvertiserStatus: (advertising, error) => set({ advertising, advertiserError: error }),
     setScanError: (error) => set({ scanError: error }),
+    setGattEnabled: (enabled) => set({ gattEnabled: enabled }),
+    setPeerTransports: (map) => set({ peerTransports: map }),
+    setGattStatus: (status) => set((s) => ({ gattStatus: { ...s.gattStatus, ...status } })),
     sendReaction: (targetPeerId, reactionId) =>
       set((s) => {
         const nonce = ((s.outgoingReaction?.nonce ?? s.recentSentNonces[s.recentSentNonces.length - 1] ?? 0) % 255) + 1;

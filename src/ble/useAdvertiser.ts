@@ -14,7 +14,9 @@ import { useStore } from '../state/store';
 import { encodePayload, FLAG_AVAILABLE } from './payload';
 import { bytesToBase64 } from './base64';
 import { shouldRepublish } from './republish';
-import { startAdvertising, updatePayload, stopAdvertising, AdvertiseError } from './advertiser';
+import { startAdvertising, updatePayload, stopAdvertising, setInteropMode, AdvertiseError } from './advertiser';
+import { BRIDGE_SERVICE_UUID } from './gatt/constants';
+import { startGattServer, updateGattPayload, stopGattServer, gattServerStatus } from './gatt/gattServer';
 
 const POLL_MS = 250;
 
@@ -22,7 +24,11 @@ export interface UseAdvertiserResult {
   error: AdvertiseError | null;
 }
 
-export function useAdvertiser(enabled: boolean, onError?: (e: AdvertiseError) => void): void {
+export function useAdvertiser(
+  enabled: boolean,
+  gattEnabled: boolean,
+  onError?: (e: AdvertiseError) => void,
+): void {
   const sequence = useRef(0);
   const lastHeading = useRef<number | null>(null);
   const lastPublishAt = useRef(0);
@@ -30,12 +36,20 @@ export function useAdvertiser(enabled: boolean, onError?: (e: AdvertiseError) =>
   const inFlight = useRef(false);
   const lastReactionNonce = useRef(0);
   const lastAckKey = useRef('');
+  const gattServerStarted = useRef(false);
+  const lastStatusPollAt = useRef(0);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
 
     const REACTION_BROADCAST_MS = 2000;
+    const STATUS_POLL_MS = 1500;
+
+    // Interop: make advertising connectable + carry the service UUID in the scan
+    // response so GATT centrals can find and connect to us. Takes effect on the
+    // next republish. Disabled path restores exact connectionless advertising.
+    void setInteropMode(gattEnabled, gattEnabled ? BRIDGE_SERVICE_UUID : null);
 
     const buildBase64 = (headingDeg: number | null, accuracy: number): string => {
       const state = useStore.getState();
@@ -109,6 +123,22 @@ export function useAdvertiser(enabled: boolean, onError?: (e: AdvertiseError) =>
         lastReactionNonce.current = reactionNonce;
         lastAckKey.current = ackKey;
         useStore.getState().setAdvertiserStatus(true, null);
+
+        // Interop: mirror the same payload out over the GATT server (notify).
+        if (gattEnabled) {
+          if (!gattServerStarted.current) {
+            gattServerStarted.current = true;
+            void startGattServer(b64);
+          } else {
+            void updateGattPayload(b64);
+          }
+          if (now - lastStatusPollAt.current > STATUS_POLL_MS) {
+            lastStatusPollAt.current = now;
+            void gattServerStatus().then((s) =>
+              useStore.getState().setGattStatus({ serverRunning: s.running, subscribers: s.subscribers }),
+            );
+          }
+        }
       } catch (e) {
         if (e instanceof AdvertiseError) {
           useStore.getState().setAdvertiserStatus(false, e.code);
@@ -129,7 +159,12 @@ export function useAdvertiser(enabled: boolean, onError?: (e: AdvertiseError) =>
       cancelled = true;
       clearInterval(interval);
       void stopAdvertising();
+      if (gattEnabled) {
+        void setInteropMode(false, null);
+        void stopGattServer();
+      }
+      gattServerStarted.current = false;
       hasPublished.current = false;
     };
-  }, [enabled, onError]);
+  }, [enabled, gattEnabled, onError]);
 }

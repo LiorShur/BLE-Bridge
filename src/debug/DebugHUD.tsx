@@ -12,7 +12,7 @@
  * NOTE: depends on React Native; not testable off-device.
  */
 import React, { useRef } from 'react';
-import { View, Text, ScrollView, StyleSheet, Platform, PanResponder, type GestureResponderEvent } from 'react-native';
+import { View, Text, Pressable, ScrollView, StyleSheet, Platform, PanResponder, type GestureResponderEvent } from 'react-native';
 import { useStore, type Tunables } from '../state/store';
 import { useNearbyPeers } from '../ble/useNearbyPeers';
 
@@ -139,6 +139,10 @@ export function DebugHUD(): React.ReactElement | null {
   const advertiserError = useStore((s) => s.advertiserError);
   const scanError = useStore((s) => s.scanError);
   const bond = useStore((s) => s.bond);
+  const gattEnabled = useStore((s) => s.gattEnabled);
+  const setGattEnabled = useStore((s) => s.setGattEnabled);
+  const gattStatus = useStore((s) => s.gattStatus);
+  const peerTransports = useStore((s) => s.peerTransports);
   const peers = useNearbyPeers();
 
   if (!visible) return null;
@@ -154,6 +158,20 @@ export function DebugHUD(): React.ReactElement | null {
       <Row label="advertising" value={advertising ? 'YES' : advertiserError ? `ERR ${advertiserError}` : 'starting…'} />
       <Row label="scan" value={scanError ? `ERR ${scanError}` : peers.length > 0 ? 'ok' : 'no results'} />
 
+      <Text style={styles.h}>INTEROP (GATT)</Text>
+      <Pressable
+        onPress={() => setGattEnabled(!gattEnabled)}
+        style={[styles.gattToggle, gattEnabled ? styles.gattOn : styles.gattOff]}
+      >
+        <Text style={styles.gattToggleText}>{gattEnabled ? 'GATT: ON (tap to disable)' : 'GATT: off (tap to enable)'}</Text>
+      </Pressable>
+      {gattEnabled ? (
+        <>
+          <Row label="server" value={gattStatus.serverRunning ? `running · ${gattStatus.subscribers} subs` : 'starting…'} />
+          <Row label="connections" value={String(gattStatus.connections)} />
+        </>
+      ) : null}
+
       <Text style={styles.h}>PRIMARY BOND</Text>
       <Row label="proximity" value={bond.proximity.toFixed(3)} />
       <Row label="alignment" value={bond.alignment.toFixed(3)} />
@@ -164,6 +182,7 @@ export function DebugHUD(): React.ReactElement | null {
       {peers.map((p) => (
         <View key={p.peerId} style={styles.peer}>
           <Row label="peerId" value={`0x${p.peerId.toString(16).padStart(8, '0')}`} />
+          {gattEnabled ? <Row label="transport" value={(peerTransports[p.peerId] ?? 'adv').toUpperCase()} /> : null}
           <Row label="rssi/smoothed" value={`${p.rssi} / ${p.smoothedRssi.toFixed(1)} dBm`} />
           <Row label="distance" value={`${p.distanceM.toFixed(2)} m`} />
           <Row label="prox/align" value={`${p.proximity.toFixed(2)} / ${p.alignment.toFixed(2)}`} />
@@ -206,6 +225,10 @@ const styles = StyleSheet.create({
   key: { color: '#9fb3c8', fontSize: 11 },
   val: { color: '#e6f1ff', fontSize: 11, fontVariant: ['tabular-nums'] },
   peer: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#26324a', marginTop: 6, paddingTop: 6 },
+  gattToggle: { borderRadius: 8, paddingVertical: 8, alignItems: 'center', marginTop: 4 },
+  gattOn: { backgroundColor: 'rgba(94,240,168,0.18)', borderWidth: 1, borderColor: '#5ef0a8' },
+  gattOff: { backgroundColor: 'rgba(124,249,255,0.08)', borderWidth: 1, borderColor: '#26324a' },
+  gattToggleText: { color: '#e6f1ff', fontSize: 12, fontWeight: '700' },
   sliderRow: { marginTop: 10 },
   sliderLabel: { color: '#cdd9e5', fontSize: 11, marginBottom: 4 },
   // Pure-JS slider parts.
