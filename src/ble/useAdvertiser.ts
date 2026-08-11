@@ -39,17 +39,30 @@ export function useAdvertiser(
   const gattServerStarted = useRef(false);
   const lastStatusPollAt = useRef(0);
 
+  // GATT peripheral lifecycle — SEPARATE from the advertising effect so toggling
+  // the interop path never tears down (and MIUI-throttles) the working
+  // advertiser. setInteropMode only changes what the NEXT republish emits.
+  useEffect(() => {
+    if (!enabled) return;
+    void setInteropMode(gattEnabled, gattEnabled ? BRIDGE_SERVICE_UUID : null);
+    if (!gattEnabled) {
+      gattServerStarted.current = false;
+      void stopGattServer();
+    }
+    return () => {
+      // On full unmount, restore connectionless advertising + tear the server.
+      void setInteropMode(false, null);
+      gattServerStarted.current = false;
+      void stopGattServer();
+    };
+  }, [enabled, gattEnabled]);
+
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
 
     const REACTION_BROADCAST_MS = 2000;
     const STATUS_POLL_MS = 1500;
-
-    // Interop: make advertising connectable + carry the service UUID in the scan
-    // response so GATT centrals can find and connect to us. Takes effect on the
-    // next republish. Disabled path restores exact connectionless advertising.
-    void setInteropMode(gattEnabled, gattEnabled ? BRIDGE_SERVICE_UUID : null);
 
     const buildBase64 = (headingDeg: number | null, accuracy: number): string => {
       const state = useStore.getState();
@@ -125,7 +138,8 @@ export function useAdvertiser(
         useStore.getState().setAdvertiserStatus(true, null);
 
         // Interop: mirror the same payload out over the GATT server (notify).
-        if (gattEnabled) {
+        // gattEnabled is read LIVE so the toggle takes effect without re-mounting.
+        if (useStore.getState().gattEnabled) {
           if (!gattServerStarted.current) {
             gattServerStarted.current = true;
             void startGattServer(b64);
@@ -159,12 +173,7 @@ export function useAdvertiser(
       cancelled = true;
       clearInterval(interval);
       void stopAdvertising();
-      if (gattEnabled) {
-        void setInteropMode(false, null);
-        void stopGattServer();
-      }
-      gattServerStarted.current = false;
       hasPublished.current = false;
     };
-  }, [enabled, gattEnabled, onError]);
+  }, [enabled, onError]);
 }

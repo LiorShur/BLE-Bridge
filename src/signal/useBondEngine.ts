@@ -36,6 +36,9 @@ import {
 
 const TICK_MS = 100;
 
+/** Only open a GATT connection once a peer is this close (proximity 0..1). */
+const CONNECT_MIN_PROXIMITY = 0.4;
+
 function tunablesFromStore(): EngineTunables {
   const t = useStore.getState().tunables;
   return {
@@ -83,6 +86,7 @@ export function useBondEngine(
   const managerRef = useRef<BleManager | null>(null);
   const scannerRef = useRef<BleScanner | null>(null);
   const gattRef = useRef<GattClient | null>(null);
+  const localPeerIdRef = useRef(0);
   const lastObsAt = useRef(0);
   const lastScanStartAt = useRef(0);
   const scanErrorRef = useRef<string | null>(null);
@@ -91,6 +95,8 @@ export function useBondEngine(
   // Transport the last observation for each peer arrived over.
   const transportByPeer = useRef<Map<number, 'adv' | 'gatt'>>(new Map());
 
+  // Main effect: scan + publish. Deliberately does NOT depend on gattEnabled, so
+  // toggling the interop path never restarts the scan (which MIUI throttles).
   useEffect(() => {
     if (!enabled) return;
 
@@ -98,9 +104,8 @@ export function useBondEngine(
     managerRef.current = manager;
     const scanner = new BleScanner(manager);
     scannerRef.current = scanner;
-    const gatt = gattEnabled ? new GattClient(manager) : null;
-    gattRef.current = gatt;
     const localPeerId = useStore.getState().localPeerId;
+    localPeerIdRef.current = localPeerId;
 
     const local = () => {
       const s = useStore.getState();
@@ -124,7 +129,7 @@ export function useBondEngine(
     };
 
     // Shared ingest for BOTH transports — the engine can't tell them apart.
-    const ingest = (obs: ScanObservation, transport: 'adv' | 'gatt'): void => {
+    const ingest = (obs: ScanObservation, transport: 'adv' | 'gatt'): PeerEngineState => {
       lastObsAt.current = obs.timestamp;
       if (scanErrorRef.current !== null) {
         scanErrorRef.current = null;
@@ -137,11 +142,12 @@ export function useBondEngine(
 
       // A GATT-connected peer stays labelled 'gatt' even though its advertisement
       // still arrives — so the HUD shows the connection is doing the work.
-      if (transport === 'gatt' || !(gatt?.isConnected(eo.peerId))) {
+      if (transport === 'gatt' || !gattRef.current?.isConnected(eo.peerId)) {
         transportByPeer.current.set(eo.peerId, transport);
       }
 
       handleReactionsAndAcks(obs.payload, eo.peerId, next.machine.bonded);
+      return next;
     };
 
     const onGattErr = (err: Error): void => {
@@ -151,9 +157,16 @@ export function useBondEngine(
     };
 
     const onAdvObs = (obs: ScanObservation): void => {
-      ingest(obs, 'adv');
-      // Interop: dial peers we should be central for (lower peerId dials).
-      if (gatt && shouldInitiateConnection(localPeerId, obs.payload.peerId)) {
+      const next = ingest(obs, 'adv');
+      // Interop: dial peers we should be central for (lower peerId), but only once
+      // the peer is genuinely CLOSE — connecting to faint/far peers is the main
+      // source of Android GATT-133 churn, and the bridge only matters up close.
+      const gatt = gattRef.current;
+      if (
+        gatt &&
+        shouldInitiateConnection(localPeerId, obs.payload.peerId) &&
+        next.machine.proximity > CONNECT_MIN_PROXIMITY
+      ) {
         gatt.ensureConnected(obs.deviceId, obs.payload.peerId, (g) => ingest(g, 'gatt'), onGattErr);
       }
     };
@@ -192,6 +205,7 @@ export function useBondEngine(
       store.setBonds(selectAllBonds(values));
       store.setPeerRows(values.map((s) => toDebugRow(s, now)));
 
+      const gatt = gattRef.current;
       if (gatt) {
         const map: Record<number, 'adv' | 'gatt'> = {};
         for (const [id, tr] of transportByPeer.current) map[id] = tr;
@@ -209,14 +223,28 @@ export function useBondEngine(
 
     return () => {
       clearInterval(interval);
-      gatt?.stop();
       scanner.stop();
       manager.destroy();
       managerRef.current = null;
       scannerRef.current = null;
-      gattRef.current = null;
       peers.current.clear();
       transportByPeer.current.clear();
     };
-  }, [enabled, gattEnabled, onScanError]);
+  }, [enabled, onScanError]);
+
+  // GATT central lifecycle — SEPARATE effect keyed on gattEnabled, reusing the
+  // scan's BleManager. Toggling interop creates/destroys only the GattClient; the
+  // advertise + scan loops keep running untouched.
+  useEffect(() => {
+    if (!enabled || !gattEnabled) return;
+    const manager = managerRef.current;
+    if (!manager) return; // main effect not mounted yet (shouldn't happen)
+    const gatt = new GattClient(manager);
+    gattRef.current = gatt;
+    return () => {
+      gatt.stop();
+      if (gattRef.current === gatt) gattRef.current = null;
+      useStore.getState().setGattStatus({ connections: 0 });
+    };
+  }, [enabled, gattEnabled]);
 }

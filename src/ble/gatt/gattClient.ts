@@ -22,6 +22,11 @@ import { BRIDGE_SERVICE_UUID, PAYLOAD_CHAR_UUID } from './constants';
 
 const RSSI_POLL_MS = 350;
 const CONNECT_TIMEOUT_MS = 8000;
+// After a failed connect, wait before retrying — growing with the attempt count.
+// Android GATT-133 is often transient, but hammering connect (the scan delivers a
+// sighting several times a second) reliably makes it WORSE, so we throttle hard.
+const BACKOFF_STEP_MS = 3000;
+const BACKOFF_MAX_MS = 20000;
 
 interface Conn {
   deviceId: string;
@@ -36,6 +41,8 @@ export class GattClient {
   private manager: BleManager;
   private conns = new Map<number, Conn>(); // by peerId
   private connecting = new Set<number>();
+  // Per-peer failed-connect backoff: last attempt time + consecutive failures.
+  private attempts = new Map<number, { lastAt: number; count: number }>();
 
   constructor(manager: BleManager) {
     this.manager = manager;
@@ -69,6 +76,13 @@ export class GattClient {
       this.drop(peerId); // MAC rotated — reconnect to the new address
     }
     if (this.connecting.has(peerId)) return;
+
+    // Respect the failed-connect backoff so we don't storm the radio.
+    const att = this.attempts.get(peerId);
+    if (att) {
+      const wait = Math.min(BACKOFF_STEP_MS * att.count, BACKOFF_MAX_MS);
+      if (Date.now() - att.lastAt < wait) return;
+    }
     this.connecting.add(peerId);
 
     this.manager
@@ -107,9 +121,12 @@ export class GattClient {
         }, RSSI_POLL_MS);
         this.conns.set(peerId, conn);
         this.connecting.delete(peerId);
+        this.attempts.delete(peerId); // success clears the backoff
       })
       .catch((err: Error) => {
         this.connecting.delete(peerId);
+        const prev = this.attempts.get(peerId);
+        this.attempts.set(peerId, { lastAt: Date.now(), count: (prev?.count ?? 0) + 1 });
         onError?.(err);
       });
   }
@@ -134,6 +151,7 @@ export class GattClient {
     conn.monitor?.remove();
     conn.disconnectSub?.remove();
     this.conns.delete(peerId);
+    this.attempts.delete(peerId); // a dropped-but-established peer may reconnect freely
     this.manager.cancelDeviceConnection(conn.deviceId).catch(() => {
       /* already gone */
     });
