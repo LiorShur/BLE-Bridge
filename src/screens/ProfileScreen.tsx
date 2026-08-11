@@ -25,10 +25,9 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
 
   const [name, setName] = useState(myName ?? '');
   const [photoURL, setPhotoURL] = useState(myPhotoURL ?? '');
-  // A locally-picked image (camera/gallery) not yet uploaded: uri for preview,
-  // base64 for the upload. Takes priority over the pasted URL until saved.
+  // A locally-picked image (camera/gallery) not yet uploaded. Takes priority over
+  // the pasted URL until saved.
   const [localUri, setLocalUri] = useState<string | null>(null);
-  const [localBase64, setLocalBase64] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,14 +37,13 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
   const pick = (asset: Asset | undefined): void => {
     if (asset?.uri) {
       setLocalUri(asset.uri);
-      setLocalBase64(asset.base64 ?? null);
       setError(null);
     }
   };
 
   const takeSelfie = async (): Promise<void> => {
     try {
-      const res = await launchCamera({ mediaType: 'photo', cameraType: 'front', quality: 0.6, maxWidth: 512, maxHeight: 512, includeBase64: true, saveToPhotos: false });
+      const res = await launchCamera({ mediaType: 'photo', cameraType: 'front', quality: 0.6, maxWidth: 512, maxHeight: 512, saveToPhotos: false });
       if (!res.didCancel && !res.errorCode) pick(res.assets?.[0]);
     } catch {
       /* camera unavailable/denied — ignore */
@@ -54,7 +52,7 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
 
   const chooseFromGallery = async (): Promise<void> => {
     try {
-      const res = await launchImageLibrary({ mediaType: 'photo', quality: 0.6, maxWidth: 512, maxHeight: 512, includeBase64: true, selectionLimit: 1 });
+      const res = await launchImageLibrary({ mediaType: 'photo', quality: 0.6, maxWidth: 512, maxHeight: 512, selectionLimit: 1 });
       if (!res.didCancel && !res.errorCode) pick(res.assets?.[0]);
     } catch {
       /* picker unavailable — ignore */
@@ -70,8 +68,8 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
     // Resolve the photo, but NEVER let a photo failure block saving the name.
     let finalPhoto: string | null = trimmedPhoto || null;
     let photoError: string | null = null;
-    if (localBase64) {
-      const res = await uploadProfilePhoto(localPeerId, localBase64);
+    if (localUri) {
+      const res = await uploadProfilePhoto(localPeerId, localUri);
       if (res.url) finalPhoto = res.url;
       else photoError = res.error ?? 'upload-failed';
     }
@@ -93,7 +91,6 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
     if (finalPhoto) {
       setPhotoURL(finalPhoto);
       setLocalUri(null);
-      setLocalBase64(null);
     }
     onDone();
   };

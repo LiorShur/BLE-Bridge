@@ -24,7 +24,7 @@ import {
   type Firestore,
 } from 'firebase/firestore';
 import { initializeAuth, getReactNativePersistence, signInAnonymously, type Auth } from 'firebase/auth';
-import { getStorage, ref as storageRef, uploadString, getDownloadURL } from 'firebase/storage';
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { firebaseConfig, isFirebaseConfigured } from '../lib/firebaseConfig';
 
@@ -99,23 +99,41 @@ export interface UploadResult {
 }
 
 /**
- * Upload a base64-encoded JPEG (from react-native-image-picker's `base64`) to
- * Storage under this peerId and return its public download URL.
+ * Fetch a local file/content URI into a NATIVE React Native Blob via XHR.
  *
- * Uses `uploadString(..., 'base64')` rather than fetch()->blob()->uploadBytes:
- * React Native's Blob does not interoperate reliably with the Firebase JS SDK's
- * uploadBytes (a well-known RN pitfall — uploads hang or fail), whereas a base64
- * string upload is robust. Returns the Firebase error code on failure so the UI
- * can distinguish a rules problem (storage/unauthorized) from a bucket/config
- * problem (storage/unknown).
+ * This is the one upload path that works in RN: both `uploadBytes(blob-from-
+ * fetch)` and `uploadString(base64)` make the Firebase SDK build a Blob from an
+ * ArrayBuffer, which RN's Blob does not support ("Creating blobs from
+ * 'ArrayBuffer' … are not supported"). An XHR with responseType 'blob' returns a
+ * native-backed Blob the SDK uploads directly, no ArrayBuffer conversion.
  */
-export async function uploadProfilePhoto(peerId: number, base64: string): Promise<UploadResult> {
+function uriToBlob(uri: string): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.onload = () => resolve(xhr.response as Blob);
+    xhr.onerror = () => reject(new Error('uri-to-blob-failed'));
+    xhr.responseType = 'blob';
+    xhr.open('GET', uri, true);
+    xhr.send(null);
+  });
+}
+
+/**
+ * Upload a local image (file:// or content:// URI, from camera or gallery) to
+ * Storage under this peerId and return its public download URL. Returns the
+ * Firebase error code on failure so the UI can distinguish a rules problem
+ * (storage/unauthorized) from a bucket/config problem (storage/unknown).
+ */
+export async function uploadProfilePhoto(peerId: number, localUri: string): Promise<UploadResult> {
   if (!ensureInit() || !app) return { error: 'firebase-unconfigured' };
   try {
     if (authReady) await authReady;
     const storage = getStorage(app);
     const r = storageRef(storage, `profilePhotos/${peerId >>> 0}.jpg`);
-    await uploadString(r, base64, 'base64', { contentType: 'image/jpeg' });
+    const blob = await uriToBlob(localUri);
+    await uploadBytes(r, blob, { contentType: 'image/jpeg' });
+    // RN blobs hold a native resource; release it.
+    (blob as unknown as { close?: () => void }).close?.();
     const url = await getDownloadURL(r);
     return { url };
   } catch (e) {
