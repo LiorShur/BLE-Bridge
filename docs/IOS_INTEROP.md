@@ -184,8 +184,10 @@ macOS runner minutes cost more than Linux; the iOS build is heavier than the APK
 
 Each phase is independently demonstrable, smallest-risk first:
 
-- **P-i0 — GATT spec pinned.** Write `docs/GATT_SPEC.md` (UUIDs, characteristics,
-  notify policy, role tie-break). No code. *Gate: owner sign-off on the reversal.*
+- **P-i0 — GATT spec pinned.** ✅ `docs/GATT_SPEC.md` written (UUIDs,
+  characteristics, notify policy, role tie-break, and the scan-response
+  advertisement strategy that keeps Android↔Android connectionless while making
+  the device discoverable/connectable by iOS). Owner approved the reversal.
 - **P-i1 — Android GATT server + central, Android↔Android over GATT.** Prove the
   connection-based path on hardware we already have, *before* touching iOS. Keeps
   the manuf-data path in parallel (dual-stack). De-risks the whole model on known

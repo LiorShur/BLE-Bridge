@@ -16,3 +16,13 @@
  */
 export const AR_ENABLED = true;
 export const HEADING_ENABLED = true;
+
+/**
+ * GATT interop path (docs/GATT_SPEC.md), OFF by default. When enabled, the app
+ * additionally advertises the Bridge service UUID (connectable) + runs a GATT
+ * server, and the central connects to service-UUID peers to exchange the payload
+ * — the cross-platform (iOS) transport. This is developed in parallel with the
+ * connectionless manufacturer-data path (dual-stack) and stays flagged off until
+ * validated on-device, so it never disturbs the shipping Android experience.
+ */
+export const GATT_ENABLED = false;
