@@ -11,7 +11,7 @@
  *
  * NOTE: depends on React Native + native BLE; not in the pure-logic test suite.
  */
-import { BleManager, ScanMode, type Device } from 'react-native-ble-plx';
+import { BleManager, ScanMode, State, type Device, type Subscription } from 'react-native-ble-plx';
 import { extractPayloadBytes } from './manufacturer';
 import { decodePayload, headingToDegrees, type DecodedPayload } from './payload';
 
@@ -37,6 +37,8 @@ export type ScanObserver = (obs: ScanObservation) => void;
 export class BleScanner {
   private manager: BleManager;
   private scanning = false;
+  private scanActive = false;
+  private stateSub: Subscription | null = null;
 
   constructor(manager?: BleManager) {
     this.manager = manager ?? new BleManager();
@@ -44,6 +46,12 @@ export class BleScanner {
 
   /**
    * Start the single long-lived scan. Safe to call when already scanning (no-op).
+   *
+   * Waits for the adapter to reach {@link State.PoweredOn} before scanning. iOS
+   * starts CoreBluetooth in `Unknown` and startDeviceScan errors with
+   * "BluetoothLE is in unknown state" if called too early; this also correctly
+   * surfaces BT-off / unauthorized instead of silently failing.
+   *
    * @param onObservation called for every accepted, decoded peer advertisement
    * @param onError       called on scan errors (permission, BT off, etc.)
    * @param now           injectable clock for testing
@@ -56,12 +64,36 @@ export class BleScanner {
     if (this.scanning) return;
     this.scanning = true;
 
+    // emitCurrentState=true fires immediately with the current state, then on
+    // changes — so if BLE is already on we scan at once, else we wait for it.
+    this.stateSub = this.manager.onStateChange((state) => {
+      if (state === State.PoweredOn) {
+        this.beginScan(onObservation, onError, now);
+      } else if (
+        state === State.PoweredOff ||
+        state === State.Unauthorized ||
+        state === State.Unsupported
+      ) {
+        this.scanActive = false;
+        onError?.(new Error(`Bluetooth ${state}`));
+      }
+      // Unknown / Resetting → keep waiting for PoweredOn.
+    }, true);
+  }
+
+  private beginScan(
+    onObservation: ScanObserver,
+    onError: ((error: Error) => void) | undefined,
+    now: () => number,
+  ): void {
+    if (this.scanActive) return; // already scanning (state can re-emit PoweredOn)
+    this.scanActive = true;
     this.manager.startDeviceScan(
       null, // no UUID filter — we filter on manufacturer data in JS
       { allowDuplicates: true, scanMode: ScanMode.LowLatency },
       (error, device: Device | null) => {
         if (error) {
-          this.scanning = false;
+          this.scanActive = false;
           onError?.(error);
           return;
         }
@@ -89,7 +121,10 @@ export class BleScanner {
 
   stop(): void {
     if (!this.scanning) return;
-    this.manager.stopDeviceScan();
+    this.stateSub?.remove();
+    this.stateSub = null;
+    if (this.scanActive) this.manager.stopDeviceScan();
+    this.scanActive = false;
     this.scanning = false;
   }
 

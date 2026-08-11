@@ -32,7 +32,15 @@ export function useIosPeripheral(enabled: boolean): void {
   const lastStatusAt = useRef(0);
 
   useEffect(() => {
-    if (!enabled || !iosPeripheralAvailable()) return;
+    if (!enabled) return;
+    // Definitive diagnosis: if the Swift module isn't compiled into the app, say
+    // so in the HUD (advertising line) rather than sitting on "starting…".
+    if (!iosPeripheralAvailable()) {
+      useStore
+        .getState()
+        .setAdvertiserStatus(false, 'BlePeripheral module missing — check Xcode target + bridging header');
+      return;
+    }
 
     const buildBase64 = (): string => {
       const s = useStore.getState();
