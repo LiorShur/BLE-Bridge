@@ -171,6 +171,14 @@ export function useBondEngine(
       }
     };
 
+    // A peer advertising the Bridge service UUID with no manufacturer data — an
+    // iPhone. Android is always the central toward an iPhone (the iPhone can't
+    // read us over GATT), so connect and read its payload characteristic.
+    const onGattCandidate = (deviceId: string, _rssi: number): void => {
+      const gatt = gattRef.current;
+      if (gatt) gatt.connectDevice(deviceId, (g) => ingest(g, 'gatt'), onGattErr);
+    };
+
     const onErr = (err: Error): void => {
       const msg = err.message || 'scan error';
       if (scanErrorRef.current !== msg) {
@@ -183,7 +191,7 @@ export function useBondEngine(
     const startScan = (now: number): void => {
       lastScanStartAt.current = now;
       lastObsAt.current = now;
-      scanner.start(onAdvObs, onErr);
+      scanner.start(onAdvObs, onErr, onGattCandidate);
     };
 
     startScan(Date.now());

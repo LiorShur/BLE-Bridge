@@ -14,6 +14,14 @@
 import { BleManager, ScanMode, State, type Device, type Subscription } from 'react-native-ble-plx';
 import { extractPayloadBytes } from './manufacturer';
 import { decodePayload, headingToDegrees, type DecodedPayload } from './payload';
+import { BRIDGE_SERVICE_UUID } from './gatt/constants';
+
+/**
+ * A peer that advertises the Bridge SERVICE UUID but carries no manufacturer
+ * payload — i.e. an iOS device (iOS can't advertise manufacturer data). The GATT
+ * interop path connects to it to read the payload characteristic.
+ */
+export type GattCandidateObserver = (deviceId: string, rssi: number) => void;
 
 /** A decoded, radio-stamped view of one peer advertisement. */
 export interface ScanObservation {
@@ -33,6 +41,13 @@ export interface ScanObservation {
 }
 
 export type ScanObserver = (obs: ScanObservation) => void;
+
+/** True if a scan result advertises the Bridge service UUID (case-insensitive). */
+function advertisesBridgeService(device: Device): boolean {
+  const uuids = device.serviceUUIDs;
+  if (!uuids) return false;
+  return uuids.some((u) => u.toLowerCase() === BRIDGE_SERVICE_UUID);
+}
 
 export class BleScanner {
   private manager: BleManager;
@@ -59,6 +74,7 @@ export class BleScanner {
   start(
     onObservation: ScanObserver,
     onError?: (error: Error) => void,
+    onGattCandidate?: GattCandidateObserver,
     now: () => number = Date.now,
   ): void {
     if (this.scanning) return;
@@ -68,7 +84,7 @@ export class BleScanner {
     // changes — so if BLE is already on we scan at once, else we wait for it.
     this.stateSub = this.manager.onStateChange((state) => {
       if (state === State.PoweredOn) {
-        this.beginScan(onObservation, onError, now);
+        this.beginScan(onObservation, onError, onGattCandidate, now);
       } else if (
         state === State.PoweredOff ||
         state === State.Unauthorized ||
@@ -84,6 +100,7 @@ export class BleScanner {
   private beginScan(
     onObservation: ScanObserver,
     onError: ((error: Error) => void) | undefined,
+    onGattCandidate: GattCandidateObserver | undefined,
     now: () => number,
   ): void {
     if (this.scanActive) return; // already scanning (state can re-emit PoweredOn)
@@ -99,7 +116,15 @@ export class BleScanner {
         }
         if (!device) return;
         const obs = this.toObservation(device, now());
-        if (obs) onObservation(obs);
+        if (obs) {
+          onObservation(obs);
+          return;
+        }
+        // No manufacturer payload — but if it advertises the Bridge service UUID
+        // it's a GATT peer (an iPhone) to connect to and read over GATT.
+        if (onGattCandidate && device.id && device.rssi != null && advertisesBridgeService(device)) {
+          onGattCandidate(device.id, device.rssi);
+        }
       },
     );
   }

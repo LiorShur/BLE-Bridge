@@ -39,10 +39,16 @@ interface Conn {
 
 export class GattClient {
   private manager: BleManager;
-  private conns = new Map<number, Conn>(); // by peerId
+  private conns = new Map<number, Conn>(); // by peerId (Android peers, id known upfront)
   private connecting = new Set<number>();
   // Per-peer failed-connect backoff: last attempt time + consecutive failures.
   private attempts = new Map<number, { lastAt: number; count: number }>();
+
+  // Device-keyed connections for peers whose peerId isn't on the wire (iOS):
+  // discovered by service UUID, peerId learned from the payload after connecting.
+  private deviceConns = new Map<string, Conn>();
+  private deviceConnecting = new Set<string>();
+  private deviceAttempts = new Map<string, { lastAt: number; count: number }>();
 
   constructor(manager: BleManager) {
     this.manager = manager;
@@ -50,7 +56,7 @@ export class GattClient {
 
   /** Number of live GATT connections (for the debug HUD). */
   activeCount(): number {
-    return this.conns.size;
+    return this.conns.size + this.deviceConns.size;
   }
 
   /** True if we currently hold a GATT link to this peer. */
@@ -105,7 +111,7 @@ export class GattClient {
             if (err) return; // disconnect handler will clean up
             if (char?.value) {
               conn.lastBytes = base64ToBytes(char.value);
-              this.emit(peerId, conn, onObs);
+              this.emitObs(conn, onObs);
             }
           },
         );
@@ -113,7 +119,7 @@ export class GattClient {
           d.readRSSI()
             .then((dd: Device) => {
               if (dd.rssi != null) conn.lastRssi = dd.rssi;
-              this.emit(peerId, conn, onObs);
+              this.emitObs(conn, onObs);
             })
             .catch(() => {
               /* transient; disconnect handler covers a real drop */
@@ -131,7 +137,73 @@ export class GattClient {
       });
   }
 
-  private emit(peerId: number, conn: Conn, onObs: (obs: ScanObservation) => void): void {
+  /**
+   * Connect to a device discovered by service UUID whose peerId is unknown until
+   * we read its payload (an iPhone). Keyed by deviceId; the emitted observation
+   * carries the peerId decoded from the characteristic. Same backoff discipline.
+   */
+  connectDevice(
+    deviceId: string,
+    onObs: (obs: ScanObservation) => void,
+    onError?: (e: Error) => void,
+  ): void {
+    if (!deviceId) return;
+    if (this.deviceConns.has(deviceId) || this.deviceConnecting.has(deviceId)) return;
+
+    const att = this.deviceAttempts.get(deviceId);
+    if (att) {
+      const wait = Math.min(BACKOFF_STEP_MS * att.count, BACKOFF_MAX_MS);
+      if (Date.now() - att.lastAt < wait) return;
+    }
+    this.deviceConnecting.add(deviceId);
+
+    this.manager
+      .connectToDevice(deviceId, { timeout: CONNECT_TIMEOUT_MS })
+      .then((d: Device) => d.discoverAllServicesAndCharacteristics())
+      .then((d: Device) => {
+        const conn: Conn = {
+          deviceId,
+          monitor: null,
+          disconnectSub: null,
+          rssiTimer: null,
+          lastRssi: null,
+          lastBytes: null,
+        };
+        conn.disconnectSub = d.onDisconnected(() => this.dropDevice(deviceId));
+        conn.monitor = d.monitorCharacteristicForService(
+          BRIDGE_SERVICE_UUID,
+          PAYLOAD_CHAR_UUID,
+          (err, char) => {
+            if (err) return;
+            if (char?.value) {
+              conn.lastBytes = base64ToBytes(char.value);
+              this.emitObs(conn, onObs);
+            }
+          },
+        );
+        conn.rssiTimer = setInterval(() => {
+          d.readRSSI()
+            .then((dd: Device) => {
+              if (dd.rssi != null) conn.lastRssi = dd.rssi;
+              this.emitObs(conn, onObs);
+            })
+            .catch(() => {
+              /* transient */
+            });
+        }, RSSI_POLL_MS);
+        this.deviceConns.set(deviceId, conn);
+        this.deviceConnecting.delete(deviceId);
+        this.deviceAttempts.delete(deviceId);
+      })
+      .catch((err: Error) => {
+        this.deviceConnecting.delete(deviceId);
+        const prev = this.deviceAttempts.get(deviceId);
+        this.deviceAttempts.set(deviceId, { lastAt: Date.now(), count: (prev?.count ?? 0) + 1 });
+        onError?.(err);
+      });
+  }
+
+  private emitObs(conn: Conn, onObs: (obs: ScanObservation) => void): void {
     if (!conn.lastBytes || conn.lastRssi == null) return; // need both a payload and an RSSI
     const payload = decodePayload(conn.lastBytes);
     if (!payload) return;
@@ -147,11 +219,23 @@ export class GattClient {
   private drop(peerId: number): void {
     const conn = this.conns.get(peerId);
     if (!conn) return;
+    this.teardown(conn);
+    this.conns.delete(peerId);
+    this.attempts.delete(peerId); // a dropped-but-established peer may reconnect freely
+  }
+
+  private dropDevice(deviceId: string): void {
+    const conn = this.deviceConns.get(deviceId);
+    if (!conn) return;
+    this.teardown(conn);
+    this.deviceConns.delete(deviceId);
+    this.deviceAttempts.delete(deviceId);
+  }
+
+  private teardown(conn: Conn): void {
     if (conn.rssiTimer) clearInterval(conn.rssiTimer);
     conn.monitor?.remove();
     conn.disconnectSub?.remove();
-    this.conns.delete(peerId);
-    this.attempts.delete(peerId); // a dropped-but-established peer may reconnect freely
     this.manager.cancelDeviceConnection(conn.deviceId).catch(() => {
       /* already gone */
     });
@@ -160,6 +244,8 @@ export class GattClient {
   /** Drop every connection. Does NOT destroy the shared BleManager. */
   stop(): void {
     for (const peerId of [...this.conns.keys()]) this.drop(peerId);
+    for (const deviceId of [...this.deviceConns.keys()]) this.dropDevice(deviceId);
     this.connecting.clear();
+    this.deviceConnecting.clear();
   }
 }
