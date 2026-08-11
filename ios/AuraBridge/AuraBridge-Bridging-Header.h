@@ -8,3 +8,4 @@
 // compiles without an explicit `import React`.
 //
 #import <React/RCTBridgeModule.h>
+#import <React/RCTEventEmitter.h>

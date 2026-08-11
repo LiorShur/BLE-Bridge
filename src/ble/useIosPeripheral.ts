@@ -5,9 +5,10 @@
  * payload as a GATT characteristic. This is how an iPhone becomes discoverable
  * and readable by an Android central (docs/GATT_SPEC.md §5).
  *
- * iOS has no compass module yet, so `heading` is advertised as unavailable
- * (the alignment fallback then drives the effect on proximity) — P-i2b+ adds a
- * Swift heading module.
+ * Heading comes from the native `Heading` module (Heading.swift, CoreLocation)
+ * via the store, exactly like Android — so a facing-aware bond forms iPhone↔
+ * Android. If the compass is unavailable the store holds null and the payload
+ * carries the sentinel, which the alignment fallback treats as proximity-only.
  *
  * NOTE: depends on React Native; not part of the pure-logic test suite.
  */
@@ -46,11 +47,13 @@ export function useIosPeripheral(enabled: boolean): void {
       const s = useStore.getState();
       const r = s.outgoingReaction;
       const a = s.outgoingAck;
+      const headingDecideg =
+        s.localHeadingDeg === null ? null : Math.round(s.localHeadingDeg * 10) % 3600;
       const bytes = encodePayload({
         version: 1,
         peerId: s.localPeerId,
-        headingDecideg: null, // no compass on iOS yet → unavailable sentinel
-        headingAccuracy: 0,
+        headingDecideg,
+        headingAccuracy: s.localHeadingAccuracy,
         txPower: s.localTxPower,
         hue: s.hue,
         flags: FLAG_AVAILABLE,

@@ -18,10 +18,14 @@ rm -rf "${SHELL_DIR}/src"
 cp -R src "${SHELL_DIR}/src"
 cp index.js app.json babel.config.js metro.config.js "${SHELL_DIR}/"
 
-echo "==> Refreshing native Swift peripheral files"
+echo "==> Refreshing native Swift files (BlePeripheral, Heading, Sound)"
 mkdir -p "${SHELL_DIR}/ios/AuraBridge/native"
 cp ios/AuraBridge/BlePeripheral.swift \
    ios/AuraBridge/BlePeripheral.m \
+   ios/AuraBridge/Heading.swift \
+   ios/AuraBridge/Heading.m \
+   ios/AuraBridge/Sound.swift \
+   ios/AuraBridge/Sound.m \
    ios/AuraBridge/AuraBridge-Bridging-Header.h \
    "${SHELL_DIR}/ios/AuraBridge/native/"
 

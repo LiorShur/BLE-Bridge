@@ -72,7 +72,8 @@ RN 0.74's default Info.plist won't have these; add them (Xcode: select
 | `NSPhotoLibraryUsageDescription` | Pick a profile photo from your library. |
 | `NSLocationWhenInUseUsageDescription` | Used for the compass heading (facing detection). |
 
-(The last one isn't exercised until P-i2b's heading module, but add it now.)
+The location string IS now exercised — the `Heading` compass module (§6)
+requests when-in-use authorization to read the compass.
 
 ## 5. Test P-i2a (Android ↔ iPhone, one-way discovery)
 
@@ -88,28 +89,39 @@ RN 0.74's default Info.plist won't have these; add them (Xcode: select
 If it doesn't connect, note the iPhone's on-screen state and (if you wire it) any
 Xcode console `CoreBluetooth` logs, and we'll iterate.
 
-## 6. Add the Swift peripheral (P-i2b) — makes the iPhone discoverable
+## 6. Add the Swift native modules (P-i2b+) — peripheral, compass, sound
 
 P-i2a only makes the iPhone a *central* (it reads Androids over their normal
-advertisement). To let **Android discover the iPhone**, add the native
-`CBPeripheralManager` module. `scripts/ios-setup.sh` already copied the files to
-`ios-shell/ios/AuraBridge/native/`; add them to the Xcode target:
+advertisement). The three Swift modules add the rest of parity with Android:
+
+- **`BlePeripheral`** — `CBPeripheralManager`; advertises the Bridge service UUID
+  and serves the payload so **Android can discover the iPhone**.
+- **`Heading`** — `CoreLocation` compass; feeds the facing/alignment gate so the
+  "turn to face each other" ritual works from the iPhone side too.
+- **`Sound`** — synthesized tones + Taptic haptics for the reaction/formation cues.
+
+`scripts/ios-setup.sh` (and `ios-update.sh`) copy all of them to
+`ios-shell/ios/AuraBridge/native/`; add them to the Xcode target once:
 
 1. In Xcode's left sidebar, right-click the **AuraBridge** group → **Add Files to
-   "AuraBridge"…** → select **`BlePeripheral.swift`** and **`BlePeripheral.m`**
-   from `ios/AuraBridge/native/`. Make sure **"AuraBridge" target is checked**.
+   "AuraBridge"…** → from `ios/AuraBridge/native/` select **all six** module
+   files — `BlePeripheral.swift`/`.m`, `Heading.swift`/`.m`, `Sound.swift`/`.m`.
+   Make sure **"AuraBridge" target is checked**.
 2. Xcode will ask **"Would you like to configure an Objective-C bridging
-   header?"** → click **Create Bridging Header**. Open the created
-   `AuraBridge-Bridging-Header.h` and make sure it contains:
+   header?"** (on the first Swift file) → click **Create Bridging Header**. Open
+   the created `AuraBridge-Bridging-Header.h` and make sure it contains BOTH
+   imports (the `Heading` module subclasses `RCTEventEmitter`):
    ```objc
    #import <React/RCTBridgeModule.h>
+   #import <React/RCTEventEmitter.h>
    ```
    (copy it from `native/AuraBridge-Bridging-Header.h` if needed).
 3. Build & Run again.
 
-The app mounts the iOS peripheral automatically on iOS. Once it's running, the
-HUD's `advertising` / `server` lines go to "running", and an interop-enabled
-Android that comes close should be able to discover the iPhone's Bridge service.
+The app mounts all three automatically on iOS. Once running, the HUD's
+`advertising` / `server` lines go to "running", the compass drives alignment
+(grant the location prompt), reactions play sound + haptics, and an
+interop-enabled Android that comes close discovers the iPhone's Bridge service.
 
 ### Verify P-i2b independently with nRF Connect
 
@@ -129,15 +141,10 @@ should see a device advertising service UUID
 
 - **iPhone advertising** requires the P-i2b Swift module (§6). Until it's added,
   the iPhone is central-only and Android can't discover it.
-- **No heading on iPhone** → alignment uses the proximity-led fallback; the
-  "face each other" gate isn't enforced from the iPhone side yet (a Swift
-  CoreLocation heading module is a later step).
 - **Profiles on iOS**: the Firebase JS SDK's Firestore can't reach its backend
   reliably under iOS RN ("could not reach backend"), so names/photos may not load
   on the iPhone. Non-fatal (the bridge works without them); the robust fix is the
   native `@react-native-firebase` SDK, tracked separately.
-- **No sound/haptics on iPhone** → the audio cues are Android-only until the Swift
-  sound module lands.
 - **txPower**: iOS doesn't expose the advertised TX reference; when the iPhone
   becomes a peripheral (P-i2b) it will advertise a per-model constant from
   `docs/CALIBRATION.md`.

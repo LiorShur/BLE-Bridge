@@ -14,7 +14,7 @@
  * NOTE: depends on React Native; not part of the pure-logic test suite.
  */
 import React, { useEffect, useRef } from 'react';
-import { View, Text, Image, Pressable, Modal, Animated, Easing, Vibration, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, Image, Pressable, Modal, Animated, Easing, Vibration, Platform, StyleSheet, Dimensions } from 'react-native';
 import { useStore } from '../state/store';
 import { hueByteToHex } from '../ar/effects';
 import { Sound } from '../audio/sound';
@@ -107,10 +107,14 @@ function Beam({
   // Formation moment: haptic + burst ring on the bonded transition.
   useEffect(() => {
     if (bond.bonded && !wasBonded.current) {
-      try {
-        Vibration.vibrate(45);
-      } catch {
-        /* vibrator unavailable/denied — never let the moment crash the app */
+      // Android: buzz here (duration-aware). iOS gets a crisp Taptic haptic from
+      // the native Sound module instead, so we don't double-buzz it.
+      if (Platform.OS === 'android') {
+        try {
+          Vibration.vibrate(45);
+        } catch {
+          /* vibrator unavailable/denied — never let the moment crash the app */
+        }
       }
       Sound.formation();
       burst.setValue(0);
@@ -219,10 +223,13 @@ export function BridgeOverlay(): React.ReactElement {
       if (!seen.current.has(r.key)) {
         seen.current.add(r.key);
         Sound.receive();
-        try {
-          Vibration.vibrate(20);
-        } catch {
-          /* no-op */
+        // Android buzzes; iOS gets its haptic from the native Sound module.
+        if (Platform.OS === 'android') {
+          try {
+            Vibration.vibrate(20);
+          } catch {
+            /* no-op */
+          }
         }
       }
     }

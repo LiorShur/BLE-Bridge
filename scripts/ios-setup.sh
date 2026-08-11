@@ -38,13 +38,18 @@ npm install --save \
   @react-native-async-storage/async-storage@^1.23.1 \
   react-native-image-picker@^7.1.2
 
-echo "==> Copying native Swift peripheral module into the iOS project"
-# P-i2b: the CBPeripheralManager module. These files must be ADDED to the Xcode
-# target manually (see docs/IOS_SETUP.md §6) — copying them here just puts them in
-# a predictable place next to the generated project.
+echo "==> Copying native Swift modules into the iOS project"
+# P-i2b+: the CBPeripheralManager (BlePeripheral), CoreLocation compass (Heading),
+# and audio+haptic (Sound) modules. These files must be ADDED to the Xcode target
+# manually (see docs/IOS_SETUP.md §6) — copying them here just puts them in a
+# predictable place next to the generated project.
 mkdir -p ios/AuraBridge/native
 cp ../ios/AuraBridge/BlePeripheral.swift ios/AuraBridge/native/
 cp ../ios/AuraBridge/BlePeripheral.m ios/AuraBridge/native/
+cp ../ios/AuraBridge/Heading.swift ios/AuraBridge/native/
+cp ../ios/AuraBridge/Heading.m ios/AuraBridge/native/
+cp ../ios/AuraBridge/Sound.swift ios/AuraBridge/native/
+cp ../ios/AuraBridge/Sound.m ios/AuraBridge/native/
 cp ../ios/AuraBridge/AuraBridge-Bridging-Header.h ios/AuraBridge/native/
 
 echo "==> Injecting Firebase config (needs FIREBASE_* env vars exported)"
