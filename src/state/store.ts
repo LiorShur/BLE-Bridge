@@ -89,13 +89,33 @@ export interface OutgoingAck {
   sentAt: number;
 }
 
-/** Cached profile lookup for a peer (name/photo fetched on bond). */
+/** Cached profile lookup for a peer (name/photo/interests fetched on bond). */
 export interface ProfileEntry {
   status: 'loading' | 'loaded' | 'missing';
   name?: string;
   photoURL?: string | null;
+  /** Discovery interest tag ids, if the peer published any. */
+  interests?: string[];
+  /** Optional one-line headline. */
+  headline?: string;
   /** When this lookup was last attempted (ms), so 'missing' can be retried. */
   triedAt?: number;
+}
+
+/** One ranked person in the "someone nearby you should meet" list (DISCOVERY_SPEC). */
+export interface NearbyPerson {
+  peerId: number;
+  name: string | null;
+  photoURL: string | null;
+  headline: string | null;
+  /** Shared interest tag ids, in my order. */
+  shared: string[];
+  /** Number of shared tags. */
+  score: number;
+  /** 0..1 proximity from the bond engine. */
+  proximity: number;
+  /** True if strong enough to nudge (score ≥ threshold). */
+  strong: boolean;
 }
 
 export interface AppState {
@@ -146,6 +166,22 @@ export interface AppState {
   myName: string | null;
   /** The local user's own photo URL (null = none). */
   myPhotoURL: string | null;
+  /** The local user's own discovery interest tag ids. */
+  myInterests: string[];
+  /** The local user's primary interest (its bucket rides the wire); null = none. */
+  myPrimaryInterest: string | null;
+  /** The local user's own one-line discovery headline (null = none). */
+  myHeadline: string | null;
+  /**
+   * Discovery mode: broadcast LOOKING_TO_MEET and surface nearby matches. OFF by
+   * default (opt-in each session, DISCOVERY_SPEC §6). Reciprocity: you only see
+   * others while you are also looking.
+   */
+  lookingToMeet: boolean;
+  /** Ranked nearby people who are also looking (written by useDiscovery). */
+  nearby: NearbyPerson[];
+  /** Whether the "People nearby" sheet is open. */
+  nearbyOpen: boolean;
   hudVisible: boolean;
 
   setCapability: (report: SupportReport) => void;
@@ -157,6 +193,14 @@ export interface AppState {
   setProfileEntry: (peerId: number, entry: ProfileEntry) => void;
   /** Set the local user's own profile (name + optional photo). */
   setMyProfile: (name: string | null, photoURL: string | null) => void;
+  /** Set the local user's own discovery profile (interests + primary + headline). */
+  setMyDiscovery: (interests: string[], primaryInterest: string | null, headline: string | null) => void;
+  /** Turn discovery mode on/off (broadcasts LOOKING_TO_MEET, surfaces matches). */
+  setLookingToMeet: (enabled: boolean) => void;
+  /** Replace the ranked nearby list (written each discovery pass). */
+  setNearby: (people: NearbyPerson[]) => void;
+  /** Open/close the "People nearby" sheet. */
+  setNearbyOpen: (open: boolean) => void;
   setTunable: <K extends keyof Tunables>(key: K, value: Tunables[K]) => void;
   setBond: (bond: BondState) => void;
   setBonds: (bonds: BondState[]) => void;
@@ -225,6 +269,12 @@ export const useStore = create<AppState>((set) => {
     profiles: {},
     myName: null,
     myPhotoURL: null,
+    myInterests: [],
+    myPrimaryInterest: null,
+    myHeadline: null,
+    lookingToMeet: false,
+    nearby: [],
+    nearbyOpen: false,
     hudVisible: false,
 
     setCapability: (report) => set({ capability: report }),
@@ -268,6 +318,11 @@ export const useStore = create<AppState>((set) => {
     setProfileEntry: (peerId, entry) =>
       set((s) => ({ profiles: { ...s.profiles, [peerId >>> 0]: entry } })),
     setMyProfile: (name, photoURL) => set({ myName: name, myPhotoURL: photoURL }),
+    setMyDiscovery: (interests, primaryInterest, headline) =>
+      set({ myInterests: interests, myPrimaryInterest: primaryInterest, myHeadline: headline }),
+    setLookingToMeet: (enabled) => set({ lookingToMeet: enabled }),
+    setNearby: (people) => set({ nearby: people }),
+    setNearbyOpen: (open) => set({ nearbyOpen: open }),
     toggleHud: () => set((s) => ({ hudVisible: !s.hudVisible })),
   };
 });

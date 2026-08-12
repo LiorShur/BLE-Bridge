@@ -31,6 +31,10 @@ import { firebaseConfig, isFirebaseConfigured } from '../lib/firebaseConfig';
 export interface Profile {
   name: string;
   photoURL: string | null;
+  /** Discovery interest tag ids (catalog: src/discovery/interests.ts). */
+  interests?: string[];
+  /** Optional one-line headline shown in the discovery list. */
+  headline?: string;
 }
 
 let app: FirebaseApp | null = null;
@@ -98,11 +102,20 @@ export async function fetchProfile(peerId: number): Promise<Profile | null> {
     if (authReady) await authReady;
     const snap = await getDoc(doc(db, PROFILES, String(peerId >>> 0)));
     if (!snap.exists()) return null;
-    const data = snap.data() as { name?: unknown; photoURL?: unknown };
+    const data = snap.data() as { name?: unknown; photoURL?: unknown; interests?: unknown; headline?: unknown };
     const name = typeof data.name === 'string' ? data.name.trim() : '';
     if (!name) return null;
     const photoURL = typeof data.photoURL === 'string' && data.photoURL ? data.photoURL : null;
-    return { name, photoURL };
+    const profile: Profile = { name, photoURL };
+    // Discovery fields are optional; tolerate their absence or malformed values.
+    if (Array.isArray(data.interests)) {
+      const interests = data.interests.filter((x): x is string => typeof x === 'string');
+      if (interests.length) profile.interests = interests;
+    }
+    if (typeof data.headline === 'string' && data.headline.trim()) {
+      profile.headline = data.headline.trim();
+    }
+    return profile;
   } catch {
     return null;
   }
@@ -163,11 +176,16 @@ export async function saveProfile(peerId: number, profile: Profile): Promise<boo
   if (!ensureInit() || !db) return false;
   try {
     if (authReady) await authReady;
-    await setDoc(
-      doc(db, PROFILES, String(peerId >>> 0)),
-      { name: profile.name.trim(), photoURL: profile.photoURL ?? null, updatedAt: serverTimestamp() },
-      { merge: true },
-    );
+    // Always write name/photo; write interests/headline explicitly (including the
+    // empty/cleared cases) so a user can REMOVE them, since we merge.
+    const docData: Record<string, unknown> = {
+      name: profile.name.trim(),
+      photoURL: profile.photoURL ?? null,
+      interests: profile.interests ?? [],
+      headline: profile.headline ?? '',
+      updatedAt: serverTimestamp(),
+    };
+    await setDoc(doc(db, PROFILES, String(peerId >>> 0)), docData, { merge: true });
     return true;
   } catch {
     return false;

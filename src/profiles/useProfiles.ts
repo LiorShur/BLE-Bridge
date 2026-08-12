@@ -38,7 +38,15 @@ export function useProfiles(): void {
         useStore.getState().setProfileEntry(
           peerId,
           p
-            ? { status: 'loaded', name: p.name, photoURL: p.photoURL }
+            ? {
+                status: 'loaded',
+                name: p.name,
+                photoURL: p.photoURL,
+                // Discovery fields (DISCOVERY_SPEC): cached so useDiscovery can
+                // match without a second fetch. Absent when the peer set none.
+                ...(p.interests ? { interests: p.interests } : {}),
+                ...(p.headline ? { headline: p.headline } : {}),
+              }
             : { status: 'missing', triedAt: Date.now() },
         );
       });

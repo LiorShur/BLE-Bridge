@@ -42,6 +42,12 @@ Do not build these unless explicitly asked:
   degrades to the anonymous hue + #TAG when unconfigured/offline. Still no
   accounts and no analytics. The BLE payload is unchanged — identity still rides
   `peerId`; only the name/photo lookup is out-of-band.
+  **Extended (2026-08-12):** the profile also carries optional discovery fields
+  `{interests[], headline}` for the "someone nearby you should meet" feature
+  (`docs/DISCOVERY_SPEC.md`, `docs/APPLICATIONS.md` Direction 1). Two tiny wire
+  hints were added in the last reserved payload space (flag bit 3
+  `LOOKING_TO_MEET` + byte-23 `interestBucket`), no version bump; the full
+  interest match is a backend lookup. Discovery is opt-in and OFF by default.
 - Cloud Anchors or UWB (these are the documented upgrade path, not the PoC)
 
 ---

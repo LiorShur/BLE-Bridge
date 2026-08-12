@@ -11,7 +11,8 @@
  */
 import { useEffect, useRef } from 'react';
 import { useStore } from '../state/store';
-import { encodePayload, FLAG_AVAILABLE } from './payload';
+import { encodePayload, FLAG_AVAILABLE, FLAG_LOOKING_TO_MEET } from './payload';
+import { bucketForPrimary } from '../discovery/interests';
 import { bytesToBase64 } from './base64';
 import { shouldRepublish } from './republish';
 import { startAdvertising, updatePayload, stopAdvertising, setInteropMode, AdvertiseError } from './advertiser';
@@ -69,6 +70,7 @@ export function useAdvertiser(
       const headingDecideg = headingDeg === null ? null : Math.round(headingDeg * 10) % 3600;
       const r = state.outgoingReaction;
       const a = state.outgoingAck;
+      const flags = FLAG_AVAILABLE | (state.lookingToMeet ? FLAG_LOOKING_TO_MEET : 0);
       const bytes = encodePayload({
         version: 1,
         peerId: state.localPeerId,
@@ -76,13 +78,15 @@ export function useAdvertiser(
         headingAccuracy: accuracy,
         txPower: state.localTxPower,
         hue: state.hue,
-        flags: FLAG_AVAILABLE,
+        flags,
         sequence: sequence.current & 0xff,
         reactionTarget: r?.targetPeerId ?? 0,
         reactionId: r?.reactionId ?? 0,
         reactionNonce: r?.nonce ?? 0,
         ackTarget: a?.targetPeerId ?? 0,
         ackNonce: a?.nonce ?? 0,
+        // Discovery hint: only meaningful when LOOKING; harmless otherwise.
+        interestBucket: state.lookingToMeet ? bucketForPrimary(state.myPrimaryInterest) : 0,
       });
       return bytesToBase64(bytes);
     };

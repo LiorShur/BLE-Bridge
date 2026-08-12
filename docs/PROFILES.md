@@ -38,11 +38,24 @@ service cloud.firestore {
       allow read: if true;                        // public identity
       allow write: if request.auth != null        // signed in (anonymous ok)
         && request.resource.data.name is string
-        && request.resource.data.name.size() <= 40;
+        && request.resource.data.name.size() <= 40
+        // Discovery fields (DISCOVERY_SPEC): optional, bounded.
+        && (!('interests' in request.resource.data)
+            || (request.resource.data.interests is list
+                && request.resource.data.interests.size() <= 8))
+        && (!('headline' in request.resource.data)
+            || (request.resource.data.headline is string
+                && request.resource.data.headline.size() <= 60));
     }
   }
 }
 ```
+
+> **Discovery update:** the `interests` (list ≤ 8) and `headline` (string ≤ 60)
+> fields were added for the "someone nearby you should meet" feature
+> (`docs/DISCOVERY_SPEC.md`). The rules above allow them; until you deploy the
+> updated rules, saving a profile with interests/headline will be **denied** and
+> discovery matching will have nothing to match on.
 
 ### Known limitation (PoC)
 

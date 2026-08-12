@@ -5,10 +5,11 @@ bridge into a **serendipity + icebreaker** tool. You walk into an event, and the
 app quietly tells you *which* nearby person is worth crossing the room for — then
 the bridge is the "go say hi," and it hands you an opener.
 
-Status: **D0 + D1 built** (payload hints + the pure matching brain, all
-unit-tested off-device); D2–D4 (profile authoring, discovery runtime, meeting
-polish) are still spec. Scoped to fit the existing architecture with the smallest
-possible change.
+Status: **D0–D3 built** (payload hints, the pure matching brain, profile
+authoring, and the discovery runtime + "People nearby" sheet). D4 (meeting
+polish — icebreaker-on-bond, warm-tint beam) is still spec; note the icebreaker
+already appears on strong-match cards in the sheet. Scoped to fit the existing
+architecture with the smallest possible change.
 
 ---
 
@@ -210,12 +211,20 @@ like the safety rails in the sibling projects.
   (12 buckets, ~50 tags), `match.ts` (`computeMatch` + `rankCandidates`), and
   `icebreakers.ts` (seeded, deterministic) — all pure, 25 unit tests, no UI and no
   backend. The whole matching "brain," verifiable off-device.
-- **D2 — profile authoring.** Interest picker / headline / looking switch in the
-  profile screen; extend `Profile` + Firestore rules.
-- **D3 — discovery runtime + Nearby sheet.** Fetch looking peers, rank, render
-  cards, the strong-match nudge.
-- **D4 — meeting polish.** Icebreaker on bond; optional warm-tint on the
-  strong-match beam.
+- **D2 — profile authoring.** ✅ Interest picker (first pick = primary ★),
+  headline, and a "Looking to meet" switch in `ProfileScreen`. `Profile` extended
+  with `interests`/`headline` (fetch + save); persisted locally and to Firestore.
+  Advertiser + iOS peripheral now set `FLAG_LOOKING_TO_MEET` and the primary's
+  `interestBucket` when looking. **Firestore rules still need the `interests`/
+  `headline` allowances added (see §2.1 / PROFILES.md) — owner action.**
+- **D3 — discovery runtime + Nearby sheet.** ✅ `useDiscovery` ranks nearby
+  LOOKING peers (reciprocity-gated) by shared interests then proximity;
+  `features/nearby/NearbySheet.tsx` renders the ranked cards (shared-tag chips,
+  proximity, strong-match highlight + icebreaker) with the live looking switch. A
+  "✨ Nearby/Meet" tab in the main view opens it and badges strong matches.
+- **D4 — meeting polish.** Icebreaker on bond (the beam moment itself); optional
+  warm-tint on the strong-match beam. *(Icebreakers already surface on strong
+  cards in the sheet.)*
 
 Each phase is demonstrable alone; D0–D1 need no hardware and no backend.
 

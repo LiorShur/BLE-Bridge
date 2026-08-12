@@ -27,6 +27,7 @@
     "src/ble/useAdvertiser.ts",
     "src/sensors",
     "src/signal/useBondEngine.ts",
+    "src/discovery/useDiscovery.ts",
     "src/state",
     "src/permissions.ts",
     "src/ar/arcore.ts",

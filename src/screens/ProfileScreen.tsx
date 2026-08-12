@@ -11,25 +11,45 @@
  * NOTE: depends on React Native; not testable off-device.
  */
 import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable, Image, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Pressable, Image, Switch, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { launchCamera, launchImageLibrary, type Asset } from 'react-native-image-picker';
 import { useStore } from '../state/store';
 import { saveProfile, uploadProfilePhoto, ensureSignedIn } from '../lib/profiles';
 import { saveMyProfileLocal } from '../identity/persistentId';
+import { INTERESTS, MAX_INTERESTS } from '../discovery/interests';
 
 export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactElement {
   const localPeerId = useStore((s) => s.localPeerId);
   const myName = useStore((s) => s.myName);
   const myPhotoURL = useStore((s) => s.myPhotoURL);
+  const myInterests = useStore((s) => s.myInterests);
+  const myHeadline = useStore((s) => s.myHeadline);
+  const storedLooking = useStore((s) => s.lookingToMeet);
   const setMyProfile = useStore((s) => s.setMyProfile);
+  const setMyDiscovery = useStore((s) => s.setMyDiscovery);
+  const setLookingToMeet = useStore((s) => s.setLookingToMeet);
 
   const [name, setName] = useState(myName ?? '');
   const [photoURL, setPhotoURL] = useState(myPhotoURL ?? '');
   // A locally-picked image (camera/gallery) not yet uploaded. Takes priority over
   // the pasted URL until saved.
   const [localUri, setLocalUri] = useState<string | null>(null);
+  // Discovery: selected interest ids (selection order preserved — the FIRST is the
+  // primary, whose bucket rides the wire), headline, and the looking-to-meet switch.
+  const [interests, setInterests] = useState<string[]>(myInterests);
+  const [headline, setHeadline] = useState(myHeadline ?? '');
+  const [looking, setLooking] = useState(storedLooking);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const toggleInterest = (id: string): void => {
+    setInterests((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= MAX_INTERESTS) return prev; // cap reached — ignore
+      return [...prev, id];
+    });
+  };
+  const primaryInterest = interests[0] ?? null;
 
   const trimmedPhoto = photoURL.trim();
   const previewUri = localUri ?? (/^https?:\/\//i.test(trimmedPhoto) ? trimmedPhoto : null);
@@ -79,10 +99,28 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
       else photoError = res.error ?? 'upload-failed';
     }
 
+    const finalHeadline = headline.trim() || null;
     setMyProfile(finalName || null, finalPhoto);
-    await saveMyProfileLocal({ name: finalName || null, photoURL: finalPhoto });
+    setMyDiscovery(interests, primaryInterest, finalHeadline);
+    setLookingToMeet(looking);
+    await saveMyProfileLocal({
+      name: finalName || null,
+      photoURL: finalPhoto,
+      interests,
+      primaryInterest,
+      headline: finalHeadline,
+    });
     let nameOk = true;
-    if (finalName) nameOk = await saveProfile(localPeerId, { name: finalName, photoURL: finalPhoto });
+    // Persist interests/headline to the backend too (only meaningful with a name,
+    // since the profile doc is keyed to a named identity peers can look up).
+    if (finalName) {
+      nameOk = await saveProfile(localPeerId, {
+        name: finalName,
+        photoURL: finalPhoto,
+        ...(interests.length ? { interests } : {}),
+        ...(finalHeadline ? { headline: finalHeadline } : {}),
+      });
+    }
     setSaving(false);
 
     if (photoError || !nameOk) {
@@ -104,7 +142,7 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.card}>
         <Text style={styles.title}>Your aura</Text>
         <Text style={styles.body}>
@@ -150,6 +188,60 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
           returnKeyType="done"
         />
 
+        <Text style={styles.label}>Interests</Text>
+        <Text style={styles.hint}>
+          Pick up to {MAX_INTERESTS}. Your first pick (★) is your headline interest. These help us
+          suggest people nearby you should meet.
+        </Text>
+        <View style={styles.chips}>
+          {INTERESTS.map((i) => {
+            const idx = interests.indexOf(i.id);
+            const selected = idx >= 0;
+            const isPrimary = idx === 0;
+            return (
+              <Pressable
+                key={i.id}
+                onPress={() => toggleInterest(i.id)}
+                style={[styles.chip, selected ? styles.chipOn : null]}
+                disabled={saving}
+              >
+                <Text style={[styles.chipText, selected ? styles.chipTextOn : null]}>
+                  {isPrimary ? '★ ' : ''}
+                  {i.emoji} {i.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Text style={styles.label}>Headline</Text>
+        <TextInput
+          style={styles.input}
+          value={headline}
+          onChangeText={setHeadline}
+          placeholder="e.g. building a BLE toy"
+          placeholderTextColor="#5b6b82"
+          maxLength={60}
+          returnKeyType="done"
+        />
+
+        <View style={styles.lookingRow}>
+          <View style={styles.lookingText}>
+            <Text style={styles.lookingTitle}>Looking to meet</Text>
+            <Text style={styles.hint}>
+              Broadcast that you’re open to meeting nearby people. You appear to others only while
+              this is on — and you can toggle it any time from the ✨ Nearby button.
+            </Text>
+          </View>
+          <Switch
+            value={looking}
+            onValueChange={setLooking}
+            trackColor={{ false: '#2a3550', true: '#2f7d8a' }}
+            thumbColor={looking ? '#7cf9ff' : '#8aa0bd'}
+            disabled={saving}
+          />
+        </View>
+
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <Pressable style={[styles.button, saving && styles.buttonDisabled]} onPress={() => void onSave()}>
@@ -159,16 +251,35 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
           <Text style={styles.skipText}>{error ? 'Continue anyway' : 'Skip for now'}</Text>
         </Pressable>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#060a1a', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  scroll: { flex: 1, backgroundColor: '#060a1a' },
+  container: { alignItems: 'center', justifyContent: 'center', padding: 24, flexGrow: 1 },
   card: { width: '100%', maxWidth: 420, backgroundColor: 'rgba(18,26,52,0.9)', borderRadius: 16, padding: 24 },
   title: { color: '#e6f1ff', fontSize: 22, fontWeight: '700', marginBottom: 8 },
   body: { color: '#9fb3c8', fontSize: 15, lineHeight: 22, marginBottom: 16 },
   label: { color: '#7cf9ff', fontSize: 12, fontWeight: '700', letterSpacing: 1, marginTop: 12, marginBottom: 6 },
+  hint: { color: '#7f92aa', fontSize: 12, lineHeight: 17, marginBottom: 8 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap' },
+  chip: {
+    backgroundColor: 'rgba(6,10,26,0.7)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(124,249,255,0.2)',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    marginRight: 7,
+    marginBottom: 7,
+  },
+  chipOn: { backgroundColor: 'rgba(124,249,255,0.16)', borderColor: '#7cf9ff' },
+  chipText: { color: '#9fb3c8', fontSize: 13, fontWeight: '600' },
+  chipTextOn: { color: '#e6f1ff' },
+  lookingRow: { flexDirection: 'row', alignItems: 'center', marginTop: 18 },
+  lookingText: { flex: 1, paddingRight: 12 },
+  lookingTitle: { color: '#e6f1ff', fontSize: 15, fontWeight: '700', marginBottom: 4 },
   labelSmall: { color: '#5b6b82', fontSize: 11, marginTop: 12, marginBottom: 6 },
   input: {
     backgroundColor: 'rgba(6,10,26,0.7)',

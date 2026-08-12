@@ -29,6 +29,8 @@ import { useAdvertiser } from './ble/useAdvertiser';
 import { useIosPeripheral } from './ble/useIosPeripheral';
 import { useBondEngine } from './signal/useBondEngine';
 import { useProfiles } from './profiles/useProfiles';
+import { useDiscovery } from './discovery/useDiscovery';
+import { NearbySheet } from './features/nearby/NearbySheet';
 import { loadOrCreatePeerId, loadMyProfile } from './identity/persistentId';
 
 type Phase = 'checking' | 'permsDenied' | 'capability' | 'onboarding' | 'profile' | 'ready';
@@ -36,6 +38,9 @@ type Phase = 'checking' | 'permsDenied' | 'capability' | 'onboarding' | 'profile
 function MainExperience(): React.ReactElement {
   const toggleHud = useStore((s) => s.toggleHud);
   const gattEnabled = useStore((s) => s.gattEnabled);
+  const setNearbyOpen = useStore((s) => s.setNearbyOpen);
+  const lookingToMeet = useStore((s) => s.lookingToMeet);
+  const strongCount = useStore((s) => s.nearby.filter((n) => n.strong).length);
 
   // Mount the full signal stack. On iOS (P-i2a) there's no native advertiser yet,
   // so advertising is not mounted — the iPhone participates as a GATT central and
@@ -47,15 +52,31 @@ function MainExperience(): React.ReactElement {
   useIosPeripheral(Platform.OS === 'ios');
   useBondEngine(true, gattEnabled);
   useProfiles();
+  // Discovery (D3): rank nearby looking peers by shared interests.
+  useDiscovery();
 
   return (
     <View style={styles.fill}>
       <CameraBridge />
       <ReactionBar />
+      {/* Discovery entry point (top-left): opens the "People nearby" sheet. Shows
+          a badge when strong matches are present. Dimmed while discovery is off. */}
+      <Pressable
+        style={[styles.nearbyTab, lookingToMeet ? styles.nearbyTabOn : null]}
+        onPress={() => setNearbyOpen(true)}
+      >
+        <Text style={styles.nearbyTabText}>{lookingToMeet ? '✨ Nearby' : '✨ Meet'}</Text>
+        {strongCount > 0 ? (
+          <View style={styles.nearbyBadge}>
+            <Text style={styles.nearbyBadgeText}>{strongCount}</Text>
+          </View>
+        ) : null}
+      </Pressable>
       {/* Hidden HUD toggle (P4-6): long-press the top-right corner. Rendered
           BEFORE the HUD so the HUD's modal overlay sits above it when open. */}
       <Pressable style={styles.hudTap} onLongPress={toggleHud} delayLongPress={600} />
       <DebugHUD />
+      <NearbySheet />
     </View>
   );
 }
@@ -77,6 +98,7 @@ export default function App(): React.ReactElement {
     store.setLocalPeerId(peerId);
     const mine = await loadMyProfile();
     store.setMyProfile(mine.name, mine.photoURL);
+    store.setMyDiscovery(mine.interests, mine.primaryInterest, mine.headline);
 
     const perms = await requestAllPermissions();
     if (!perms.granted) {
@@ -133,4 +155,30 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   spinner: { marginTop: 18 },
   hudTap: { position: 'absolute', top: 0, right: 0, width: 64, height: 64 },
+  nearbyTab: {
+    position: 'absolute',
+    top: 48,
+    left: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(6,10,26,0.6)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(124,249,255,0.25)',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  nearbyTabOn: { borderColor: '#7cf9ff', backgroundColor: 'rgba(124,249,255,0.14)' },
+  nearbyTabText: { color: '#cfe0f5', fontSize: 13, fontWeight: '700', letterSpacing: 0.5 },
+  nearbyBadge: {
+    marginLeft: 7,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#ff5f8f',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  nearbyBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
 });

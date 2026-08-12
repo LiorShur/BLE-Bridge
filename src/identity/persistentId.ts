@@ -16,6 +16,9 @@ import { generatePeerId, PEER_ID_UNSET } from '../ble/identity';
 const PEER_ID_KEY = 'aurabridge.peerId';
 const MY_NAME_KEY = 'aurabridge.profile.name';
 const MY_PHOTO_KEY = 'aurabridge.profile.photoURL';
+const MY_INTERESTS_KEY = 'aurabridge.profile.interests';
+const MY_PRIMARY_KEY = 'aurabridge.profile.primaryInterest';
+const MY_HEADLINE_KEY = 'aurabridge.profile.headline';
 
 /** Load the stored peerId, or generate + persist a new one. Never returns 0. */
 export async function loadOrCreatePeerId(): Promise<number> {
@@ -38,18 +41,42 @@ export async function loadOrCreatePeerId(): Promise<number> {
 export interface StoredProfile {
   name: string | null;
   photoURL: string | null;
+  /** Discovery interest tag ids (catalog: src/discovery/interests.ts). */
+  interests: string[];
+  /** The primary interest whose bucket rides the wire (null = none). */
+  primaryInterest: string | null;
+  /** Optional one-line discovery headline. */
+  headline: string | null;
 }
 
 /** Load the local user's own saved profile (for prefilling the setup screen). */
 export async function loadMyProfile(): Promise<StoredProfile> {
   try {
-    const [name, photoURL] = await Promise.all([
+    const [name, photoURL, interestsRaw, primaryInterest, headline] = await Promise.all([
       AsyncStorage.getItem(MY_NAME_KEY),
       AsyncStorage.getItem(MY_PHOTO_KEY),
+      AsyncStorage.getItem(MY_INTERESTS_KEY),
+      AsyncStorage.getItem(MY_PRIMARY_KEY),
+      AsyncStorage.getItem(MY_HEADLINE_KEY),
     ]);
-    return { name: name ?? null, photoURL: photoURL ?? null };
+    let interests: string[] = [];
+    if (interestsRaw) {
+      try {
+        const parsed: unknown = JSON.parse(interestsRaw);
+        if (Array.isArray(parsed)) interests = parsed.filter((x): x is string => typeof x === 'string');
+      } catch {
+        /* corrupt — treat as empty */
+      }
+    }
+    return {
+      name: name ?? null,
+      photoURL: photoURL ?? null,
+      interests,
+      primaryInterest: primaryInterest || null,
+      headline: headline || null,
+    };
   } catch {
-    return { name: null, photoURL: null };
+    return { name: null, photoURL: null, interests: [], primaryInterest: null, headline: null };
   }
 }
 
@@ -59,6 +86,9 @@ export async function saveMyProfileLocal(profile: StoredProfile): Promise<void> 
     await AsyncStorage.multiSet([
       [MY_NAME_KEY, profile.name ?? ''],
       [MY_PHOTO_KEY, profile.photoURL ?? ''],
+      [MY_INTERESTS_KEY, JSON.stringify(profile.interests ?? [])],
+      [MY_PRIMARY_KEY, profile.primaryInterest ?? ''],
+      [MY_HEADLINE_KEY, profile.headline ?? ''],
     ]);
   } catch {
     /* best-effort */

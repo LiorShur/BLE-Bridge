@@ -14,8 +14,9 @@
  */
 import { useEffect, useRef } from 'react';
 import { useStore } from '../state/store';
-import { encodePayload, FLAG_AVAILABLE } from './payload';
+import { encodePayload, FLAG_AVAILABLE, FLAG_LOOKING_TO_MEET } from './payload';
 import { bytesToBase64 } from './base64';
+import { bucketForPrimary } from '../discovery/interests';
 import {
   startIosPeripheral,
   updateIosPeripheralPayload,
@@ -49,6 +50,7 @@ export function useIosPeripheral(enabled: boolean): void {
       const a = s.outgoingAck;
       const headingDecideg =
         s.localHeadingDeg === null ? null : Math.round(s.localHeadingDeg * 10) % 3600;
+      const flags = FLAG_AVAILABLE | (s.lookingToMeet ? FLAG_LOOKING_TO_MEET : 0);
       const bytes = encodePayload({
         version: 1,
         peerId: s.localPeerId,
@@ -56,13 +58,14 @@ export function useIosPeripheral(enabled: boolean): void {
         headingAccuracy: s.localHeadingAccuracy,
         txPower: s.localTxPower,
         hue: s.hue,
-        flags: FLAG_AVAILABLE,
+        flags,
         sequence: sequence.current & 0xff,
         reactionTarget: r?.targetPeerId ?? 0,
         reactionId: r?.reactionId ?? 0,
         reactionNonce: r?.nonce ?? 0,
         ackTarget: a?.targetPeerId ?? 0,
         ackNonce: a?.nonce ?? 0,
+        interestBucket: s.lookingToMeet ? bucketForPrimary(s.myPrimaryInterest) : 0,
       });
       return bytesToBase64(bytes);
     };
