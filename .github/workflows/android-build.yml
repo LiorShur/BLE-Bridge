@@ -39,6 +39,17 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # Caches the Gradle User Home — crucially including the wrapper
+      # distribution (~/.gradle/wrapper/dists) and downloaded dependencies. After
+      # the first successful run this restores gradle-8.6-all.zip from the Actions
+      # cache instead of re-fetching it, so a flaky 503 from the distribution host
+      # (which broke a build once) can't recur on cache hits, and builds are faster.
+      # cache-read-only:false lets this non-default branch populate the cache too.
+      - name: Set up Gradle (cache distribution + dependencies)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
       - name: Pure-logic tests (payload codec + signal engine)
         run: |
           set -eux
@@ -107,9 +118,21 @@ jobs:
       - name: Gradle assembleRelease
         working-directory: shell/android
         run: |
-          set -eux
+          set -ux
           chmod +x ./gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace
+          # Retry the build: on a cold cache the wrapper still fetches the Gradle
+          # distribution once, and that host has 503'd before. Three attempts with
+          # backoff turn a transient network flake into a slower green instead of a
+          # red run. A real compile error fails all three and still surfaces.
+          n=0
+          until [ "$n" -ge 3 ]; do
+            ./gradlew assembleRelease --no-daemon --stacktrace && exit 0
+            n=$((n + 1))
+            echo "Gradle attempt $n failed; retrying in $((n * 20))s (likely a transient download flake)…"
+            sleep $((n * 20))
+          done
+          echo "Gradle failed after 3 attempts."
+          exit 1
 
       - name: Locate APK
         id: apk
