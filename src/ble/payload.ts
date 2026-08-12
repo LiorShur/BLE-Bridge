@@ -1,8 +1,9 @@
 /**
  * Advertisement payload codec — see docs/PAYLOAD_SPEC.md.
  *
- * Wire format is 12 used bytes + 12 reserved (zero) = 24 bytes total, the whole
- * available manufacturer-data budget. All multi-byte fields are big-endian.
+ * Wire format is 24 bytes total, the whole available manufacturer-data budget:
+ * 12 core bytes, the reaction/ack blocks (12–22), and the discovery interest-bucket
+ * hint (byte 23) — no reserved bytes remain. All multi-byte fields are big-endian.
  *
  * These functions are PURE and have no dependency on React Native, the radio, or
  * platform endianness (DataView is used explicitly). They are the one part of the
@@ -64,6 +65,13 @@ export interface DecodedPayload {
    */
   ackTarget: number; // uint32 (0 = none)
   ackNonce: number; // uint8
+  /**
+   * Discovery hint (byte 23, formerly reserved). Coarse primary-interest category
+   * for the "someone nearby you should meet" pre-filter (docs/DISCOVERY_SPEC.md).
+   * 0 = unset. The real interest match is a backend lookup; this is only a cheap
+   * signal to prioritise it. Old builds read byte 23 as 0 and ignore it.
+   */
+  interestBucket: number; // uint8 (0 = unset)
 }
 
 /** Fields accepted by {@link encodePayload}. Reaction/ack fields default to 0. */
@@ -81,20 +89,26 @@ export interface PayloadFields {
   reactionNonce?: number;
   ackTarget?: number;
   ackNonce?: number;
+  interestBucket?: number;
 }
 
 /** Byte offset of the reaction block (bytes 12–17). */
 export const REACTION_OFFSET = 12;
 /** Byte offset of the delivery-ack block (bytes 18–22). */
 export const ACK_OFFSET = 18;
-/** Minimum buffer length to carry the reaction block / the ack block. */
+/** Byte offset of the discovery interest-bucket hint (byte 23). */
+export const INTEREST_BUCKET_OFFSET = 23;
+/** Minimum buffer length to carry the reaction block / the ack block / the bucket. */
 const REACTION_END = 18;
 const ACK_END = 23;
+const INTEREST_BUCKET_END = 24;
 
 /** `flags` bitfield masks — see PAYLOAD_SPEC §5. */
 export const FLAG_AVAILABLE = 0x01;
 export const FLAG_ALREADY_BRIDGED = 0x02;
 export const FLAG_STATIONARY = 0x04;
+/** Discovery mode: user is open to meeting nearby strangers (docs/DISCOVERY_SPEC.md). */
+export const FLAG_LOOKING_TO_MEET = 0x08;
 
 function assertUint(value: number, bits: number, name: string): void {
   if (!Number.isInteger(value) || value < 0 || value > (2 ** bits - 1)) {
@@ -135,11 +149,13 @@ export function encodePayload(fields: PayloadFields): Uint8Array {
   const reactionNonce = fields.reactionNonce ?? 0;
   const ackTarget = fields.ackTarget ?? 0;
   const ackNonce = fields.ackNonce ?? 0;
+  const interestBucket = fields.interestBucket ?? 0;
   assertUint(reactionTarget, 32, 'reactionTarget');
   assertUint(reactionId, 8, 'reactionId');
   assertUint(reactionNonce, 8, 'reactionNonce');
   assertUint(ackTarget, 32, 'ackTarget');
   assertUint(ackNonce, 8, 'ackNonce');
+  assertUint(interestBucket, 8, 'interestBucket');
 
   const buf = new Uint8Array(PAYLOAD_BYTES); // trailing reserved block stays zero
   const view = new DataView(buf.buffer);
@@ -156,6 +172,7 @@ export function encodePayload(fields: PayloadFields): Uint8Array {
   view.setUint8(REACTION_OFFSET + 5, reactionNonce);
   view.setUint32(ACK_OFFSET, ackTarget, false);
   view.setUint8(ACK_OFFSET + 4, ackNonce);
+  view.setUint8(INTEREST_BUCKET_OFFSET, interestBucket);
   return buf;
 }
 
@@ -204,6 +221,7 @@ export function decodePayload(bytes: Uint8Array): DecodedPayload | null {
   let reactionNonce = 0;
   let ackTarget = 0;
   let ackNonce = 0;
+  let interestBucket = 0;
   if (bytes.length >= REACTION_END) {
     reactionTarget = view.getUint32(REACTION_OFFSET, false);
     reactionId = view.getUint8(REACTION_OFFSET + 4);
@@ -212,6 +230,10 @@ export function decodePayload(bytes: Uint8Array): DecodedPayload | null {
   if (bytes.length >= ACK_END) {
     ackTarget = view.getUint32(ACK_OFFSET, false);
     ackNonce = view.getUint8(ACK_OFFSET + 4);
+  }
+  // Discovery hint (byte 23). Absent on short/old packets → 0 (unset).
+  if (bytes.length >= INTEREST_BUCKET_END) {
+    interestBucket = view.getUint8(INTEREST_BUCKET_OFFSET);
   }
 
   return {
@@ -228,6 +250,7 @@ export function decodePayload(bytes: Uint8Array): DecodedPayload | null {
     reactionNonce,
     ackTarget,
     ackNonce,
+    interestBucket,
   };
 }
 

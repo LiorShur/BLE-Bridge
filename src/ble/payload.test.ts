@@ -8,6 +8,8 @@ import {
   HEADING_MAX,
   PAYLOAD_BYTES,
   USED_BYTES,
+  INTEREST_BUCKET_OFFSET,
+  FLAG_LOOKING_TO_MEET,
   type PayloadFields,
 } from './payload';
 
@@ -98,6 +100,7 @@ describe('decodePayload', () => {
       reactionNonce: 17,
       ackTarget: 0x0102abcd,
       ackNonce: 200,
+      interestBucket: 7,
     };
     const decoded = decodePayload(encodePayload(original));
     expect(decoded).toEqual(original);
@@ -201,6 +204,46 @@ describe('decodePayload', () => {
     framed.set(encodePayload(withHeading(900)), 8);
     const view = framed.subarray(8);
     expect(decodePayload(view)?.headingDecideg).toBe(900);
+  });
+});
+
+describe('discovery hints (D0)', () => {
+  it('round-trips the interestBucket in byte 23', () => {
+    const bytes = encodePayload({ ...base, headingDecideg: 0, interestBucket: 42 });
+    expect(bytes[INTEREST_BUCKET_OFFSET]).toBe(42);
+    expect(decodePayload(bytes)?.interestBucket).toBe(42);
+  });
+
+  it('defaults interestBucket to 0 when omitted', () => {
+    const bytes = encodePayload(withHeading(500));
+    expect(bytes[INTEREST_BUCKET_OFFSET]).toBe(0);
+    expect(decodePayload(bytes)?.interestBucket).toBe(0);
+  });
+
+  it('reads interestBucket as 0 from an old 23-byte packet (no byte 23)', () => {
+    const full = encodePayload({ ...base, headingDecideg: 0, interestBucket: 99 });
+    const short = full.subarray(0, 23); // sender predating the discovery hint
+    const decoded = decodePayload(short);
+    expect(decoded?.peerId).toBe(base.peerId);
+    expect(decoded?.interestBucket).toBe(0);
+  });
+
+  it('rejects an out-of-range interestBucket at encode time', () => {
+    expect(() => encodePayload({ ...base, headingDecideg: 0, interestBucket: 256 })).toThrow(RangeError);
+    expect(() => encodePayload({ ...base, headingDecideg: 0, interestBucket: -1 })).toThrow(RangeError);
+  });
+
+  it('carries the LOOKING_TO_MEET flag through flags, alongside other bits', () => {
+    const bytes = encodePayload({ ...base, headingDecideg: 0, flags: FLAG_LOOKING_TO_MEET | 0x01 });
+    const flags = decodePayload(bytes)?.flags ?? 0;
+    expect(flags & FLAG_LOOKING_TO_MEET).toBe(FLAG_LOOKING_TO_MEET);
+    expect(FLAG_LOOKING_TO_MEET).toBe(0x08);
+  });
+
+  it('a build without the LOOKING_TO_MEET flag reads it as unset', () => {
+    const bytes = encodePayload({ ...base, headingDecideg: 0, flags: 0x01 });
+    const flags = decodePayload(bytes)?.flags ?? 0;
+    expect(flags & FLAG_LOOKING_TO_MEET).toBe(0);
   });
 });
 

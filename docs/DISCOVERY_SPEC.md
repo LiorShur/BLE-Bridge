@@ -5,8 +5,10 @@ bridge into a **serendipity + icebreaker** tool. You walk into an event, and the
 app quietly tells you *which* nearby person is worth crossing the room for — then
 the bridge is the "go say hi," and it hands you an opener.
 
-Status: **spec only**, nothing built yet. Scoped to fit the existing
-architecture with the smallest possible change.
+Status: **D0 + D1 built** (payload hints + the pure matching brain, all
+unit-tested off-device); D2–D4 (profile authoring, discovery runtime, meeting
+polish) are still spec. Scoped to fit the existing architecture with the smallest
+possible change.
 
 ---
 
@@ -200,10 +202,14 @@ like the safety rails in the sibling projects.
 
 ## 7. Phasing
 
-- **D0 — payload hints.** Add `LOOKING_TO_MEET` + `interestBucket` to
-  `payload.ts` with codec tests (incl. old-build tolerance). No behaviour yet.
-- **D1 — catalog + match + icebreakers.** The three pure modules, fully tested.
-  No UI. This is the whole "brain," verifiable off-device.
+- **D0 — payload hints.** ✅ `FLAG_LOOKING_TO_MEET` (flags bit 3) +
+  `interestBucket` (byte 23) added to `payload.ts` with codec tests, including
+  old-build tolerance (a 23-byte packet decodes the bucket as 0). No behaviour
+  wired yet. `PAYLOAD_SPEC.md §5/§10` updated.
+- **D1 — catalog + match + icebreakers.** ✅ `src/discovery/interests.ts`
+  (12 buckets, ~50 tags), `match.ts` (`computeMatch` + `rankCandidates`), and
+  `icebreakers.ts` (seeded, deterministic) — all pure, 25 unit tests, no UI and no
+  backend. The whole matching "brain," verifiable off-device.
 - **D2 — profile authoring.** Interest picker / headline / looking switch in the
   profile screen; extend `Profile` + Firestore rules.
 - **D3 — discovery runtime + Nearby sheet.** Fetch looking peers, rank, render

@@ -27,7 +27,7 @@ with `ADVERTISE_FAILED_DATA_TOO_LARGE` (error code 1).
 
 ## 2. Layout
 
-23 bytes used, 1 reserved.
+24 bytes used, 0 reserved.
 
 | Offset | Size | Field | Type | Description |
 |---:|---:|---|---|---|
@@ -44,13 +44,15 @@ with `ADVERTISE_FAILED_DATA_TOO_LARGE` (error code 1).
 | 17 | 1 | `reactionNonce` | uint8 | Increments per fresh send so a receiver fires exactly once. |
 | 18 | 4 | `ackTarget` | uint32 BE | peerId whose reaction this confirms; `0` = none. See §9. |
 | 22 | 1 | `ackNonce` | uint8 | Echoes the `reactionNonce` being confirmed. |
-| 23 | 1 | `reserved` | — | Must be written as zero. Receivers must ignore. |
+| 23 | 1 | `interestBucket` | uint8 | Discovery hint (`docs/DISCOVERY_SPEC.md`): coarse primary-interest category, `0` = unset. See §10. |
 
-> **Reactions (bytes 12–17) and the delivery ack (bytes 18–22) were added in the
-> previously-reserved block without a version bump.** Because §6 requires
-> receivers to ignore reserved bytes and tolerate short/long buffers, a build
-> that predates either field simply reads it as 0 and ignores it — the
-> forward-compatibility the reserved block was for.
+> **Reactions (bytes 12–17), the delivery ack (bytes 18–22), and the discovery
+> `interestBucket` (byte 23) were all added in the previously-reserved block
+> without a version bump.** Because §6 requires receivers to ignore reserved bytes
+> and tolerate short/long buffers, a build that predates any of these simply reads
+> it as 0 and ignores it — the forward-compatibility the reserved block was for.
+> The reserved block is now fully consumed; the next added field needs a version
+> bump or a different carrier (e.g. the backend profile — see §10).
 
 ### Reference encoding
 
@@ -117,7 +119,7 @@ state keying, and UI all use `peerId`.
 | 0 | `0x01` | Available — user is open to forming a bridge |
 | 1 | `0x02` | Already bridged to another peer |
 | 2 | `0x04` | Device is stationary (from accelerometer) |
-| 3 | `0x08` | Reserved |
+| 3 | `0x08` | Looking to meet — user is in discovery mode, open to meeting nearby strangers (`docs/DISCOVERY_SPEC.md`). Distinct from bit 0. |
 | 4 | `0x10` | Reserved |
 | 5 | `0x20` | Reserved |
 | 6 | `0x40` | Reserved |
@@ -126,8 +128,8 @@ state keying, and UI all use `peerId`.
 Reserved bits must be transmitted as zero and ignored on receipt, so that a
 version-1 receiver keeps working against a later sender that sets them.
 
-For the PoC only bit 0 needs to be honoured; bits 1 and 2 are populated but
-unused, and exist so the wire format doesn't need a version bump later.
+For the PoC bit 0 gates bridging; bits 1 and 2 are populated but unused; bit 3
+(`LOOKING_TO_MEET`) gates the discovery feature (§10). Bits 4–7 remain reserved.
 
 ---
 
@@ -210,3 +212,22 @@ best-effort (the soft-ack above is the only receipt signal); broadcast, not
 private (addressed by `peerId`, but anyone in range can observe it); and tiny (a
 fixed catalog, not arbitrary data). Rich or reliable messaging would require a
 GATT channel — a deliberate non-goal here.
+
+---
+
+## 10. Discovery hint (byte 23)
+
+Supports the "someone nearby you should meet" feature (`docs/DISCOVERY_SPEC.md`),
+paired with the `LOOKING_TO_MEET` flag (bit 3, §5).
+
+- `interestBucket` is the sender's **primary** interest's coarse category id
+  (`1`–`255`; `0` = unset). It is a *hint*, not a match: a scanner uses it to
+  cheaply decide whether to fetch that peer's full profile before ranking. The
+  real interest match is computed from the peer's `interests[]` list, which lives
+  in the **backend profile** (like name/photo), never on the wire — the payload is
+  full and interests don't fit.
+- Because it occupies the last formerly-reserved byte, a build predating it reads
+  byte 23 as 0 (unset) and the feature simply doesn't engage. No version bump.
+- Anyone in range can observe the bucket; it is deliberately coarse (a category,
+  not a tag list) so nothing sensitive rides the broadcast. See
+  `docs/DISCOVERY_SPEC.md §6` for the privacy model.
