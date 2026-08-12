@@ -142,6 +142,8 @@ export function DebugHUD(): React.ReactElement | null {
   const bond = useStore((s) => s.bond);
   const gattEnabled = useStore((s) => s.gattEnabled);
   const setGattEnabled = useStore((s) => s.setGattEnabled);
+  const proximityMode = useStore((s) => s.proximityMode);
+  const setProximityMode = useStore((s) => s.setProximityMode);
   const gattStatus = useStore((s) => s.gattStatus);
   const gattError = useStore((s) => s.gattError);
   const peerTransports = useStore((s) => s.peerTransports);
@@ -168,6 +170,16 @@ export function DebugHUD(): React.ReactElement | null {
       <Row label="hdg acc" value={String(headingAccuracy)} />
       <Row label="advertising" value={advertising ? 'YES' : advertiserError ? `ERR ${advertiserError}` : 'starting…'} />
       <Row label="scan" value={scanError ? `ERR ${scanError}` : peers.length > 0 ? 'ok' : 'no results'} />
+
+      <Text style={styles.h}>BOND MODE</Text>
+      <Pressable
+        onPress={() => setProximityMode(!proximityMode)}
+        style={[styles.gattToggle, proximityMode ? styles.gattOn : styles.gattOff]}
+      >
+        <Text style={styles.gattToggleText}>
+          {proximityMode ? 'PROXIMITY (tap for face-to-face)' : 'FACE-TO-FACE (tap for proximity)'}
+        </Text>
+      </Pressable>
 
       <Text style={styles.h}>INTEROP (GATT)</Text>
       <Pressable

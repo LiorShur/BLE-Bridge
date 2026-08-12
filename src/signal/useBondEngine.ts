@@ -36,7 +36,8 @@ import {
 const TICK_MS = 100;
 
 function tunablesFromStore(): EngineTunables {
-  const t = useStore.getState().tunables;
+  const s = useStore.getState();
+  const t = s.tunables;
   return {
     alpha: t.alpha,
     pathLossN: t.pathLossN,
@@ -45,7 +46,9 @@ function tunablesFromStore(): EngineTunables {
     toleranceDeg: t.toleranceDeg,
     formThreshold: t.formThreshold,
     breakThreshold: t.breakThreshold,
-    alignFloor: t.alignFloor,
+    // Proximity-only mode pins the alignment floor to 1 so facing never gates the
+    // bond; otherwise the tunable value keeps facing as a factor (§3.2).
+    alignFloor: s.proximityMode ? 1 : t.alignFloor,
     staleMs: t.staleMs,
     decayMs: t.decayMs,
     removeMs: t.removeMs,

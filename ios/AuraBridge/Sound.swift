@@ -34,9 +34,15 @@ class Sound: NSObject {
 
   override init() {
     super.init()
-    // Ambient + mixWithOthers: our blips layer over anything else and honour the
-    // hardware mute switch, which is the right behaviour for incidental UI sound.
-    try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+    // Playback (not ambient) so cues are audible even with the ring/silent switch
+    // set to silent — for a demo the "whoa" sound must fire regardless. mixWithOthers
+    // keeps us polite: we layer over other audio instead of interrupting it.
+    try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
+    try? AVAudioSession.sharedInstance().setActive(true)
+  }
+
+  /** Ensure the session is active right before playing (it can get deactivated). */
+  private func activateSession() {
     try? AVAudioSession.sharedInstance().setActive(true)
   }
 
@@ -80,6 +86,7 @@ class Sound: NSObject {
   /** Build a short mono PCM WAV of a (possibly gliding) sine tone and play it. */
   private func playSweep(from f0: Double, to f1: Double, duration: Double) {
     guard let data = Self.makeSineWav(from: f0, to: f1, duration: duration) else { return }
+    activateSession()
     do {
       let player = try AVAudioPlayer(data: data)
       player.volume = 0.6

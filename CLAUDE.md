@@ -111,6 +111,13 @@ must hold the device upright in portrait, roughly aligned with their body. This
 is acceptable — it's how you'd hold a phone to look through it anyway. Indoor
 magnetic interference degrades headings; see the accuracy fallback in §4.3.
 
+**Runtime toggle (2026-08-12, owner request):** the facing gate is now a runtime
+mode, not a fixed law. A HUD toggle (`proximityMode` in the store) switches
+between **PROXIMITY** (closeness alone forms the bond; `alignFloor` pinned to 1)
+and **FACE-TO-FACE** (this §3.2 ritual). Default is PROXIMITY for the testing
+phase until a concrete use-case fixes the choice. The alignment math and payload
+are unchanged — the toggle only sets the floor, so nothing downstream moved.
+
 ### 3.3 Identity lives in the payload, not the MAC address
 
 Android randomises the advertiser's Bluetooth address periodically (roughly

@@ -126,6 +126,12 @@ export interface AppState {
   incomingReactions: IncomingReaction[];
   /** Interop (GATT) path on/off — a debug toggle (docs/GATT_SPEC.md). */
   gattEnabled: boolean;
+  /**
+   * Proximity-only mode: when true the bond forms on closeness alone and the
+   * "turn to face each other" facing gate is disabled (alignFloor forced to 1).
+   * Default ON for the testing phase; flip off to require mutual facing (§3.2).
+   */
+  proximityMode: boolean;
   /** Transport the last observation for each peer arrived over. */
   peerTransports: Record<number, 'adv' | 'gatt'>;
   /** GATT server/central status for the HUD. */
@@ -159,6 +165,8 @@ export interface AppState {
   setScanError: (error: string | null) => void;
   /** Toggle the interop (GATT) path (debug). */
   setGattEnabled: (enabled: boolean) => void;
+  /** Toggle proximity-only mode (true) vs. facing-required mode (false). */
+  setProximityMode: (enabled: boolean) => void;
   /** Replace the per-peer transport map (written each publish tick). */
   setPeerTransports: (map: Record<number, 'adv' | 'gatt'>) => void;
   /** Update GATT status fields for the HUD. */
@@ -203,6 +211,9 @@ export const useStore = create<AppState>((set) => {
     // of either platform without any toggle. (The HUD toggle remains for debug.)
     // Android reads Android over ADV and iPhones over GATT; iOS is GATT-only.
     gattEnabled: true,
+    // Proximity-only by default for the testing phase — closeness alone forms the
+    // bond. Flip off in the HUD to bring back the face-to-face ritual (§3.2).
+    proximityMode: true,
     peerTransports: {},
     gattStatus: { serverRunning: false, subscribers: 0, connections: 0 },
     gattError: null,
@@ -228,6 +239,7 @@ export const useStore = create<AppState>((set) => {
     setAdvertiserStatus: (advertising, error) => set({ advertising, advertiserError: error }),
     setScanError: (error) => set({ scanError: error }),
     setGattEnabled: (enabled) => set({ gattEnabled: enabled }),
+    setProximityMode: (enabled) => set({ proximityMode: enabled }),
     setPeerTransports: (map) => set({ peerTransports: map }),
     setGattStatus: (status) => set((s) => ({ gattStatus: { ...s.gattStatus, ...status } })),
     setGattError: (error) => set({ gattError: error }),
