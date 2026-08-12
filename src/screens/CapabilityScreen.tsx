@@ -21,10 +21,23 @@ export interface CapabilityScreenProps {
   onContinue?: () => void;
 }
 
-function Check({ ok, label, detail }: { ok: boolean; label: string; detail?: string }): React.ReactElement {
+function Check({
+  ok,
+  label,
+  detail,
+  tone = 'check',
+}: {
+  ok: boolean;
+  label: string;
+  detail?: string;
+  /** 'check' = pass/fail (✓/✗). 'info' = neutral (◦), for things not yet knowable. */
+  tone?: 'check' | 'info';
+}): React.ReactElement {
+  const glyph = tone === 'info' ? '◦' : ok ? '✓' : '✗';
+  const color = tone === 'info' ? '#9fb3c8' : ok ? '#5ef0a8' : '#ff6b6b';
   return (
     <View style={styles.line}>
-      <Text style={[styles.icon, { color: ok ? '#5ef0a8' : '#ff6b6b' }]}>{ok ? '✓' : '✗'}</Text>
+      <Text style={[styles.icon, { color }]}>{glyph}</Text>
       <View style={styles.lineText}>
         <Text style={styles.label}>{label}</Text>
         {detail ? <Text style={styles.detail}>{detail}</Text> : null}
@@ -72,7 +85,14 @@ export function CapabilityScreen({ support, arCore, compassPresent, onContinue }
         )}
         {arCore ? <Check ok={arCore.available} label="ARCore available" detail={arCore.reason} /> : null}
         {compassPresent !== undefined ? (
-          <Check ok={compassPresent} label="Compass present" detail={compassPresent ? undefined : 'Effect will run on proximity alone.'} />
+          // Compass readiness isn't knowable yet at this screen (the sensor starts
+          // with the experience), so present it as info, not a pass/fail — a ✗ here
+          // read as "no compass" when it just hadn't started.
+          compassPresent ? (
+            <Check ok label="Compass ready" />
+          ) : (
+            <Check ok={false} tone="info" label="Compass" detail="Starts with the experience; face-to-face uses it, else proximity." />
+          )
         ) : null}
       </View>
     </MessageScreen>

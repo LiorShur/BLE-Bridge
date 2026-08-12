@@ -13,19 +13,22 @@
  *
  * NOTE: depends on React Native; not part of the pure-logic test suite.
  */
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, Image, Pressable, Modal, Animated, Easing, Vibration, Platform, StyleSheet, Dimensions } from 'react-native';
 import { useStore } from '../state/store';
 import { hueByteToHex } from '../ar/effects';
 import { Sound } from '../audio/sound';
 import { reactionById } from '../reactions';
+import { icebreakerFor } from '../discovery/icebreakers';
 import { shortPeerTag } from './peerLabel';
 import type { BondState } from '../signal/bond';
-import type { IncomingReaction, ProfileEntry } from '../state/store';
+import type { IncomingReaction, ProfileEntry, NearbyPerson } from '../state/store';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const MAX_BEAM = SCREEN_H * 0.4;
 const MAX_BEAMS = 5;
+/** Warm accent for a strong interest match (DISCOVERY_SPEC D4). */
+const MATCH_GOLD = '#ffd479';
 
 function statusLabel(b: BondState | undefined): string {
   if (!b || !b.peer) return 'looking for someone…';
@@ -84,12 +87,16 @@ function Beam({
   bond,
   reactions,
   profile,
+  match,
 }: {
   bond: BondState;
   reactions: IncomingReaction[];
   profile: ProfileEntry | undefined;
+  /** Discovery match for this peer (only present in discovery mode). */
+  match: NearbyPerson | undefined;
 }): React.ReactElement {
   const hue = bond.peer ? hueByteToHex(bond.peer.hue) : '#7cf9ff';
+  const strongMatch = match?.strong ?? false;
   const strength = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
   const burst = useRef(new Animated.Value(0)).current;
@@ -169,6 +176,12 @@ function Beam({
         <Animated.View
           style={[styles.flash, { backgroundColor: hue, shadowColor: hue, opacity: flashOpacity, transform: [{ scale: flashScale }] }]}
         />
+        {/* Strong-match: a warm gold ring outside the halo (D4 warm-tint). */}
+        {strongMatch ? (
+          <Animated.View
+            style={[styles.matchRing, { borderColor: MATCH_GOLD, shadowColor: MATCH_GOLD, opacity: haloOpacity, transform: [{ scale: haloScale }] }]}
+          />
+        ) : null}
         {/* Soft breathing halo behind the reticle while bonded. */}
         <Animated.View
           style={[styles.halo, { backgroundColor: hue, opacity: haloOpacity, transform: [{ scale: haloScale }] }]}
@@ -191,6 +204,12 @@ function Beam({
           <Text style={styles.chipText} numberOfLines={1}>
             {profile?.status === 'loaded' && profile.name ? profile.name : shortPeerTag(bond.peer.peerId)}
           </Text>
+          {/* Interest-match badge: "✨ N" shared, gold when strong (D4). */}
+          {match && match.score > 0 ? (
+            <View style={[styles.chipMatch, strongMatch ? { backgroundColor: MATCH_GOLD } : null]}>
+              <Text style={[styles.chipMatchText, strongMatch ? styles.chipMatchTextStrong : null]}>✨{match.score}</Text>
+            </View>
+          ) : null}
         </Pressable>
       ) : null}
       <Animated.View
@@ -209,12 +228,68 @@ function Beam({
   );
 }
 
+/**
+ * A transient opener shown at the moment a bond forms with someone you share
+ * interests with (DISCOVERY_SPEC D4). Fades in, holds, fades out, then unmounts
+ * via onDone. Keyed by the trigger so a new match restarts it cleanly.
+ */
+function IcebreakerBanner({ text, onDone }: { text: string; onDone: () => void }): React.ReactElement {
+  const a = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const anim = Animated.sequence([
+      Animated.timing(a, { toValue: 1, duration: 300, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.delay(6000),
+      Animated.timing(a, { toValue: 0, duration: 500, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
+    ]);
+    anim.start(({ finished }) => {
+      if (finished) onDone();
+    });
+    return () => anim.stop();
+  }, [a, onDone]);
+  const translateY = a.interpolate({ inputRange: [0, 1], outputRange: [14, 0] });
+  return (
+    <Animated.View style={[styles.icebreaker, { opacity: a, transform: [{ translateY }] }]} pointerEvents="none">
+      <Text style={styles.icebreakerText}>💬 {text}</Text>
+    </Animated.View>
+  );
+}
+
 export function BridgeOverlay(): React.ReactElement {
   const bonds = useStore((s) => s.bonds);
   const incoming = useStore((s) => s.incomingReactions);
   const profiles = useStore((s) => s.profiles);
+  const nearby = useStore((s) => s.nearby);
   const list = bonds.slice(0, MAX_BEAMS);
   const primary = list[0];
+
+  const nearbyByPeer = new Map<number, NearbyPerson>(nearby.map((n) => [n.peerId, n]));
+
+  // Icebreaker-on-bond (D4): when a peer we share interests with crosses into the
+  // bonded state, surface a one-line opener once. Tracked per-peer so it fires
+  // once per bond (and again on a fresh bond), and tolerant of the match data
+  // arriving a beat after the bond forms.
+  const [icebreaker, setIcebreaker] = useState<{ text: string; key: number } | null>(null);
+  const shownIce = useRef<Set<number>>(new Set());
+  const iceKey = useRef(0);
+  const clearIce = useCallback(() => setIcebreaker(null), []);
+  useEffect(() => {
+    const bondedIds = new Set(list.filter((b) => b.bonded && b.peer).map((b) => b.peer!.peerId));
+    // Forget peers that un-bonded, so a later re-bond can re-open.
+    for (const id of [...shownIce.current]) if (!bondedIds.has(id)) shownIce.current.delete(id);
+    for (const b of list) {
+      if (!b.bonded || !b.peer) continue;
+      const id = b.peer.peerId;
+      if (shownIce.current.has(id)) continue;
+      const m = nearbyByPeer.get(id);
+      if (m && m.shared.length > 0) {
+        const text = icebreakerFor(m.shared, id);
+        if (text) {
+          shownIce.current.add(id);
+          setIcebreaker({ text, key: iceKey.current++ });
+        }
+      }
+    }
+  }, [list, nearbyByPeer]);
 
   // Fire the "received" audio/haptic cue once per freshly-arrived reaction.
   const seen = useRef<Set<number>>(new Set());
@@ -251,9 +326,12 @@ export function BridgeOverlay(): React.ReactElement {
             bond={b}
             reactions={reactionsByPeer(b.peer?.peerId)}
             profile={b.peer ? profiles[b.peer.peerId >>> 0] : undefined}
+            match={b.peer ? nearbyByPeer.get(b.peer.peerId) : undefined}
           />
         ))}
       </View>
+
+      {icebreaker ? <IcebreakerBanner key={icebreaker.key} text={icebreaker.text} onDone={clearIce} /> : null}
 
       <View style={styles.statusWrap} pointerEvents="none">
         <Text style={[styles.status, primary?.bonded && primary.peer ? { color: hueByteToHex(primary.peer.hue) } : null]}>
@@ -325,6 +403,15 @@ const styles = StyleSheet.create({
   chipDot: { width: 8, height: 8, borderRadius: 4, marginRight: 5 },
   chipAvatar: { width: 18, height: 18, borderRadius: 9, marginRight: 6, borderWidth: 1, backgroundColor: '#0d1530' },
   chipText: { color: '#cfe0f5', fontSize: 11, fontWeight: '600', letterSpacing: 0.5, maxWidth: 96 },
+  chipMatch: {
+    marginLeft: 5,
+    backgroundColor: 'rgba(255,212,121,0.25)',
+    borderRadius: 8,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  chipMatchText: { color: MATCH_GOLD, fontSize: 10, fontWeight: '800' },
+  chipMatchTextStrong: { color: '#3a2a06' },
   cardBackdrop: { flex: 1, backgroundColor: 'rgba(4,6,16,0.8)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   card: {
     backgroundColor: 'rgba(18,26,52,0.98)',
@@ -351,6 +438,16 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
   },
   burst: { position: 'absolute', width: 48, height: 48, borderRadius: 24, borderWidth: 3 },
+  matchRing: {
+    position: 'absolute',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 2,
+    shadowOpacity: 0.9,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 0 },
+  },
   halo: {
     position: 'absolute',
     width: 46,
@@ -402,4 +499,18 @@ const styles = StyleSheet.create({
   status: { color: '#e6f1ff', fontSize: 18, fontWeight: '700', letterSpacing: 2 },
   sub: { color: '#9fb3c8', fontSize: 13, marginTop: 4 },
   hint: { color: '#9fb3c8', fontSize: 13, marginTop: 6 },
+  icebreaker: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    bottom: 320,
+    backgroundColor: 'rgba(12,18,38,0.92)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,212,121,0.5)',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  icebreakerText: { color: '#ffe9bf', fontSize: 14, fontWeight: '600', lineHeight: 20, textAlign: 'center' },
 });

@@ -5,11 +5,10 @@ bridge into a **serendipity + icebreaker** tool. You walk into an event, and the
 app quietly tells you *which* nearby person is worth crossing the room for — then
 the bridge is the "go say hi," and it hands you an opener.
 
-Status: **D0–D3 built** (payload hints, the pure matching brain, profile
-authoring, and the discovery runtime + "People nearby" sheet). D4 (meeting
-polish — icebreaker-on-bond, warm-tint beam) is still spec; note the icebreaker
-already appears on strong-match cards in the sheet. Scoped to fit the existing
-architecture with the smallest possible change.
+Status: **D0–D4 built** — the discovery feature is functionally complete
+(payload hints, matching brain, profile authoring, runtime + "People nearby"
+sheet, and the meeting-moment polish). Scoped to fit the existing architecture
+with the smallest possible change.
 
 ---
 
@@ -222,9 +221,11 @@ like the safety rails in the sibling projects.
   `features/nearby/NearbySheet.tsx` renders the ranked cards (shared-tag chips,
   proximity, strong-match highlight + icebreaker) with the live looking switch. A
   "✨ Nearby/Meet" tab in the main view opens it and badges strong matches.
-- **D4 — meeting polish.** Icebreaker on bond (the beam moment itself); optional
-  warm-tint on the strong-match beam. *(Icebreakers already surface on strong
-  cards in the sheet.)*
+- **D4 — meeting polish.** ✅ On the bridge itself: a strong-match beam gets a
+  warm gold ring behind its reticle + a "✨N" badge on the identity chip, and the
+  instant a bond forms with someone you share interests with, a one-line
+  icebreaker banner fades in over the view (`BridgeOverlay`). Only ever shown in
+  discovery mode.
 
 Each phase is demonstrable alone; D0–D1 need no hardware and no backend.
 
