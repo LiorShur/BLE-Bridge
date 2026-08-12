@@ -7,7 +7,7 @@
  * NOTE: depends on React Native; not testable off-device.
  */
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, Platform, StyleSheet } from 'react-native';
 import type { SupportReport } from '../ble/advertiser';
 import type { ArCoreReport } from '../ar/arcore';
 import { MessageScreen } from './MessageScreen';
@@ -34,10 +34,15 @@ function Check({ ok, label, detail }: { ok: boolean; label: string; detail?: str
 }
 
 export function CapabilityScreen({ support, arCore, compassPresent, onContinue }: CapabilityScreenProps): React.ReactElement {
-  const advertisingBlocked = !support.advertisingSupported;
-  // Gate on BLE + ARCore. Compass is informational: if it's missing/uncalibrated
-  // the alignment math falls back to proximity (CLAUDE.md §4.3), so don't block.
-  const allGo = support.supported && (arCore ? arCore.available : true);
+  // iOS can't advertise manufacturer data, so it never reports
+  // advertisingSupported — but it IS discoverable over the GATT peripheral
+  // (docs/GATT_SPEC.md). So on iOS the Android multiple-advertisement check is
+  // irrelevant and must not read as "broken / try a different phone".
+  const isIOS = Platform.OS === 'ios';
+  const advertisingBlocked = !isIOS && !support.advertisingSupported;
+  // Gate on BLE (+ ARCore where checked). Compass is informational: if it's
+  // missing/uncalibrated the alignment math falls back to proximity (§4.3).
+  const allGo = !advertisingBlocked && support.supported && (arCore ? arCore.available : true);
 
   return (
     <MessageScreen
@@ -55,11 +60,16 @@ export function CapabilityScreen({ support, arCore, compassPresent, onContinue }
       <View style={styles.checks}>
         <Check ok={support.bluetoothPresent} label="Bluetooth present" />
         <Check ok={support.bluetoothEnabled} label="Bluetooth enabled" detail={support.bluetoothEnabled ? undefined : 'Turn Bluetooth on.'} />
-        <Check
-          ok={support.advertisingSupported}
-          label="BLE advertising supported"
-          detail={support.advertisingSupported ? undefined : 'isMultipleAdvertisementSupported = false.'}
-        />
+        {isIOS ? (
+          // On iPhone, discoverability is the GATT peripheral, not BLE advertising.
+          <Check ok label="Discoverable (GATT)" detail="iPhone is found over the interop path." />
+        ) : (
+          <Check
+            ok={support.advertisingSupported}
+            label="BLE advertising supported"
+            detail={support.advertisingSupported ? undefined : 'isMultipleAdvertisementSupported = false.'}
+          />
+        )}
         {arCore ? <Check ok={arCore.available} label="ARCore available" detail={arCore.reason} /> : null}
         {compassPresent !== undefined ? (
           <Check ok={compassPresent} label="Compass present" detail={compassPresent ? undefined : 'Effect will run on proximity alone.'} />

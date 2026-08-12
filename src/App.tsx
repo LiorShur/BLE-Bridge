@@ -13,7 +13,7 @@
  * NOTE: depends on React Native + Viro; not testable off-device.
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Pressable, StyleSheet, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform } from 'react-native';
 import { CameraBridge } from './ar/CameraBridge';
 import { ReactionBar } from './ui/Reactions';
 import { DebugHUD } from './debug/DebugHUD';
