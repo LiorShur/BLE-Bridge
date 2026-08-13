@@ -20,6 +20,9 @@ const MY_INTERESTS_KEY = 'aurabridge.profile.interests';
 const MY_PRIMARY_KEY = 'aurabridge.profile.primaryInterest';
 const MY_HEADLINE_KEY = 'aurabridge.profile.headline';
 const MY_CATALOG_KEY = 'aurabridge.profile.catalog';
+const MY_VISIBILITY_KEY = 'aurabridge.profile.visibility';
+
+const VALID_VISIBILITY = new Set(['off', 'open', 'curious', 'ghost']);
 
 /** Load the stored peerId, or generate + persist a new one. Never returns 0. */
 export async function loadOrCreatePeerId(): Promise<number> {
@@ -50,18 +53,21 @@ export interface StoredProfile {
   headline: string | null;
   /** Active interest catalog id (per-event); null = use the default. */
   activeCatalogId: string | null;
+  /** Discovery visibility mode ('off'|'open'|'curious'|'ghost'); null = default off. */
+  visibility: string | null;
 }
 
 /** Load the local user's own saved profile (for prefilling the setup screen). */
 export async function loadMyProfile(): Promise<StoredProfile> {
   try {
-    const [name, photoURL, interestsRaw, primaryInterest, headline, activeCatalogId] = await Promise.all([
+    const [name, photoURL, interestsRaw, primaryInterest, headline, activeCatalogId, visibility] = await Promise.all([
       AsyncStorage.getItem(MY_NAME_KEY),
       AsyncStorage.getItem(MY_PHOTO_KEY),
       AsyncStorage.getItem(MY_INTERESTS_KEY),
       AsyncStorage.getItem(MY_PRIMARY_KEY),
       AsyncStorage.getItem(MY_HEADLINE_KEY),
       AsyncStorage.getItem(MY_CATALOG_KEY),
+      AsyncStorage.getItem(MY_VISIBILITY_KEY),
     ]);
     let interests: string[] = [];
     if (interestsRaw) {
@@ -79,9 +85,10 @@ export async function loadMyProfile(): Promise<StoredProfile> {
       primaryInterest: primaryInterest || null,
       headline: headline || null,
       activeCatalogId: activeCatalogId || null,
+      visibility: visibility && VALID_VISIBILITY.has(visibility) ? visibility : null,
     };
   } catch {
-    return { name: null, photoURL: null, interests: [], primaryInterest: null, headline: null, activeCatalogId: null };
+    return { name: null, photoURL: null, interests: [], primaryInterest: null, headline: null, activeCatalogId: null, visibility: null };
   }
 }
 
@@ -95,6 +102,7 @@ export async function saveMyProfileLocal(profile: StoredProfile): Promise<void> 
       [MY_PRIMARY_KEY, profile.primaryInterest ?? ''],
       [MY_HEADLINE_KEY, profile.headline ?? ''],
       [MY_CATALOG_KEY, profile.activeCatalogId ?? ''],
+      [MY_VISIBILITY_KEY, profile.visibility ?? ''],
     ]);
   } catch {
     /* best-effort */

@@ -13,7 +13,7 @@
  * NOTE: depends on React Native; not part of the pure-logic test suite.
  */
 import { useEffect, useRef } from 'react';
-import { useStore } from '../state/store';
+import { useStore, isBroadcasting } from '../state/store';
 import { encodePayload, FLAG_AVAILABLE, FLAG_LOOKING_TO_MEET } from './payload';
 import { bytesToBase64 } from './base64';
 import { bucketForPrimary } from '../discovery/interests';
@@ -50,7 +50,8 @@ export function useIosPeripheral(enabled: boolean): void {
       const a = s.outgoingAck;
       const headingDecideg =
         s.localHeadingDeg === null ? null : Math.round(s.localHeadingDeg * 10) % 3600;
-      const flags = FLAG_AVAILABLE | (s.lookingToMeet ? FLAG_LOOKING_TO_MEET : 0);
+      const broadcasting = isBroadcasting(s.visibility);
+      const flags = FLAG_AVAILABLE | (broadcasting ? FLAG_LOOKING_TO_MEET : 0);
       const bytes = encodePayload({
         version: 1,
         peerId: s.localPeerId,
@@ -65,7 +66,7 @@ export function useIosPeripheral(enabled: boolean): void {
         reactionNonce: r?.nonce ?? 0,
         ackTarget: a?.targetPeerId ?? 0,
         ackNonce: a?.nonce ?? 0,
-        interestBucket: s.lookingToMeet ? bucketForPrimary(s.myPrimaryInterest) : 0,
+        interestBucket: broadcasting ? bucketForPrimary(s.myPrimaryInterest) : 0,
       });
       return bytesToBase64(bytes);
     };

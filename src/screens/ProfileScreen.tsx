@@ -11,9 +11,10 @@
  * NOTE: depends on React Native; not testable off-device.
  */
 import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable, Image, Switch, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Pressable, Image, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { launchCamera, launchImageLibrary, type Asset } from 'react-native-image-picker';
 import { useStore } from '../state/store';
+import { VISIBILITY_OPTIONS, type Visibility } from '../discovery/visibility';
 import { saveProfile, uploadProfilePhoto, ensureSignedIn } from '../lib/profiles';
 import { saveMyProfileLocal } from '../identity/persistentId';
 import { CATALOGS, catalogInterests, MAX_INTERESTS } from '../discovery/interests';
@@ -24,11 +25,11 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
   const myPhotoURL = useStore((s) => s.myPhotoURL);
   const myInterests = useStore((s) => s.myInterests);
   const myHeadline = useStore((s) => s.myHeadline);
-  const storedLooking = useStore((s) => s.lookingToMeet);
+  const storedVisibility = useStore((s) => s.visibility);
   const storedCatalogId = useStore((s) => s.activeCatalogId);
   const setMyProfile = useStore((s) => s.setMyProfile);
   const setMyDiscovery = useStore((s) => s.setMyDiscovery);
-  const setLookingToMeet = useStore((s) => s.setLookingToMeet);
+  const setVisibility = useStore((s) => s.setVisibility);
   const setActiveCatalog = useStore((s) => s.setActiveCatalog);
 
   const [name, setName] = useState(myName ?? '');
@@ -42,7 +43,7 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
   const [catalogId, setCatalogId] = useState(storedCatalogId);
   const [interests, setInterests] = useState<string[]>(myInterests);
   const [headline, setHeadline] = useState(myHeadline ?? '');
-  const [looking, setLooking] = useState(storedLooking);
+  const [visibility, setVis] = useState<Visibility>(storedVisibility);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -115,7 +116,7 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
     setMyProfile(finalName || null, finalPhoto);
     setMyDiscovery(interests, primaryInterest, finalHeadline);
     setActiveCatalog(catalogId);
-    setLookingToMeet(looking);
+    setVisibility(visibility);
     await saveMyProfileLocal({
       name: finalName || null,
       photoURL: finalPhoto,
@@ -123,6 +124,7 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
       primaryInterest,
       headline: finalHeadline,
       activeCatalogId: catalogId,
+      visibility,
     });
     let nameOk = true;
     // Persist interests/headline to the backend too (only meaningful with a name,
@@ -256,22 +258,30 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
           returnKeyType="done"
         />
 
-        <View style={styles.lookingRow}>
-          <View style={styles.lookingText}>
-            <Text style={styles.lookingTitle}>Looking to meet</Text>
-            <Text style={styles.hint}>
-              Broadcast that you’re open to meeting nearby people. You appear to others only while
-              this is on — and you can toggle it any time from the ✨ Nearby button.
-            </Text>
-          </View>
-          <Switch
-            value={looking}
-            onValueChange={setLooking}
-            trackColor={{ false: '#2a3550', true: '#2f7d8a' }}
-            thumbColor={looking ? '#7cf9ff' : '#8aa0bd'}
-            disabled={saving}
-          />
-        </View>
+        <Text style={styles.label}>Discovery</Text>
+        <Text style={styles.hint}>
+          Choose how you show up to people nearby. You can change this any time from the ✨ Nearby
+          button.
+        </Text>
+        {VISIBILITY_OPTIONS.map((o) => {
+          const on = o.mode === visibility;
+          return (
+            <Pressable
+              key={o.mode}
+              onPress={() => setVis(o.mode)}
+              style={[styles.visRow, on ? styles.visRowOn : null]}
+              disabled={saving}
+            >
+              <Text style={styles.visRadio}>{on ? '◉' : '○'}</Text>
+              <View style={styles.visText}>
+                <Text style={styles.visTitle}>
+                  {o.emoji} {o.label}
+                </Text>
+                <Text style={styles.visDesc}>{o.desc}</Text>
+              </View>
+            </Pressable>
+          );
+        })}
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -308,9 +318,22 @@ const styles = StyleSheet.create({
   chipOn: { backgroundColor: 'rgba(124,249,255,0.16)', borderColor: '#7cf9ff' },
   chipText: { color: '#9fb3c8', fontSize: 13, fontWeight: '600' },
   chipTextOn: { color: '#e6f1ff' },
-  lookingRow: { flexDirection: 'row', alignItems: 'center', marginTop: 18 },
-  lookingText: { flex: 1, paddingRight: 12 },
-  lookingTitle: { color: '#e6f1ff', fontSize: 15, fontWeight: '700', marginBottom: 4 },
+  visRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(6,10,26,0.55)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(124,249,255,0.12)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 8,
+  },
+  visRowOn: { borderColor: '#7cf9ff', backgroundColor: 'rgba(124,249,255,0.1)' },
+  visRadio: { color: '#7cf9ff', fontSize: 18, width: 24, marginTop: 1 },
+  visText: { flex: 1 },
+  visTitle: { color: '#e6f1ff', fontSize: 15, fontWeight: '700' },
+  visDesc: { color: '#7f92aa', fontSize: 12, lineHeight: 17, marginTop: 3 },
   labelSmall: { color: '#5b6b82', fontSize: 11, marginTop: 12, marginBottom: 6 },
   input: {
     backgroundColor: 'rgba(6,10,26,0.7)',

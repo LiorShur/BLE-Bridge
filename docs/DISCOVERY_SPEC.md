@@ -193,10 +193,21 @@ Broadcasting "I'm open to meeting" plus interests has real-world stakes; treat i
 like the safety rails in the sibling projects.
 
 - **Discovery is opt-in and OFF by default.** No `LOOKING_TO_MEET`, no discovery
-  fetches, until the user flips the switch. The bridge works fully without it.
-- **Invisible ≠ blind.** A user can browse nearby people without being looking
-  themselves? No — reciprocity by design: you only appear in others' lists while
-  you are also looking. This avoids a lurker asymmetry.
+  fetches, until the user chooses a mode. The bridge works fully without it.
+- **Visibility modes (built — `src/discovery/visibility.ts`, pure + tested).** The
+  original binary is now four modes that separate *being visible*, *seeing others*,
+  and *being nudged*:
+  | mode | broadcast (visible) | browse (see others) | proactive nudge |
+  |---|---|---|---|
+  | `off` | – | – | – |
+  | `open` | ✓ | ✓ | ✓ |
+  | `curious` | ✓ | ✓ | – |
+  | `ghost` | – | ✓ | – |
+  Reciprocity is the default (`open`/`curious`: you appear while you browse).
+  `ghost` deliberately breaks it — browse without being seen — offered as an
+  explicit, opt-in choice (never the default), so the lurker asymmetry is a
+  conscious user decision rather than a silent hole. Selectable from the profile
+  screen and live in the Nearby sheet; persisted locally.
 - **On the wire we leak only a coarse bucket + one flag bit** — never names or
   tag lists. The advertisement is observable by anyone in range (§3.1), so
   nothing sensitive rides it. Full tags require fetching a profile the user chose

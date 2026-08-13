@@ -12,8 +12,9 @@
  * NOTE: depends on React Native; not part of the pure-logic test suite.
  */
 import React from 'react';
-import { View, Text, Image, Pressable, Switch, Modal, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, Image, Pressable, Modal, ScrollView, StyleSheet } from 'react-native';
 import { useStore, type NearbyPerson } from '../../state/store';
+import { VISIBILITY_OPTIONS, isBrowsing } from '../../discovery/visibility';
 import { interestById } from '../../discovery/interests';
 import { icebreakerFor } from '../../discovery/icebreakers';
 import { hueByteToHex } from '../../ar/effects';
@@ -83,14 +84,15 @@ function PersonCard({ person }: { person: NearbyPerson }): React.ReactElement {
 export function NearbySheet(): React.ReactElement | null {
   const open = useStore((s) => s.nearbyOpen);
   const setOpen = useStore((s) => s.setNearbyOpen);
-  const lookingToMeet = useStore((s) => s.lookingToMeet);
-  const setLookingToMeet = useStore((s) => s.setLookingToMeet);
+  const visibility = useStore((s) => s.visibility);
+  const setVisibility = useStore((s) => s.setVisibility);
   const myInterests = useStore((s) => s.myInterests);
   const nearby = useStore((s) => s.nearby);
 
   if (!open) return null;
 
   const close = (): void => setOpen(false);
+  const browsing = isBrowsing(visibility);
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={close} statusBarTranslucent>
@@ -104,26 +106,32 @@ export function NearbySheet(): React.ReactElement | null {
             </Pressable>
           </View>
 
-          <View style={styles.toggleRow}>
-            <View style={styles.toggleText}>
-              <Text style={styles.toggleTitle}>Looking to meet</Text>
-              <Text style={styles.toggleSub}>
-                You appear to others only while this is on.
-              </Text>
-            </View>
-            <Switch
-              value={lookingToMeet}
-              onValueChange={setLookingToMeet}
-              trackColor={{ false: '#2a3550', true: '#2f7d8a' }}
-              thumbColor={lookingToMeet ? '#7cf9ff' : '#8aa0bd'}
-            />
+          {/* Visibility selector: a compact chip per mode (DISCOVERY_SPEC §6). */}
+          <View style={styles.modeRow}>
+            {VISIBILITY_OPTIONS.map((o) => {
+              const on = o.mode === visibility;
+              return (
+                <Pressable
+                  key={o.mode}
+                  onPress={() => setVisibility(o.mode)}
+                  style={[styles.modeChip, on ? styles.modeChipOn : null]}
+                >
+                  <Text style={[styles.modeChipText, on ? styles.modeChipTextOn : null]}>
+                    {o.emoji} {o.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
+          <Text style={styles.modeDesc}>
+            {VISIBILITY_OPTIONS.find((o) => o.mode === visibility)?.desc ?? ''}
+          </Text>
 
           <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
-            {!lookingToMeet ? (
+            {!browsing ? (
               <Text style={styles.empty}>
-                Turn on “Looking to meet” to discover nearby people who share your interests. You’ll
-                become visible to them too.
+                Pick Open, Curious, or Ghost above to discover nearby people who share your
+                interests.
               </Text>
             ) : myInterests.length === 0 ? (
               <Text style={styles.empty}>
@@ -131,8 +139,8 @@ export function NearbySheet(): React.ReactElement | null {
               </Text>
             ) : nearby.length === 0 ? (
               <Text style={styles.empty}>
-                No one nearby is looking right now. When someone else nearby turns this on, they’ll
-                appear here — closest and best-matched first.
+                No one nearby is discoverable right now. When someone else nearby turns on Open or
+                Curious, they’ll appear here — closest and best-matched first.
               </Text>
             ) : (
               nearby.map((p) => <PersonCard key={p.peerId} person={p} />)
@@ -162,19 +170,21 @@ const styles = StyleSheet.create({
   title: { color: '#e6f1ff', fontSize: 20, fontWeight: '800', letterSpacing: 0.5 },
   closeBtn: { padding: 6 },
   closeTxt: { color: '#9fb3c8', fontSize: 20, fontWeight: '700' },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  modeRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 2 },
+  modeChip: {
     backgroundColor: 'rgba(6,10,26,0.7)',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(124,249,255,0.15)',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    marginRight: 7,
+    marginBottom: 7,
   },
-  toggleText: { flex: 1, paddingRight: 12 },
-  toggleTitle: { color: '#e6f1ff', fontSize: 15, fontWeight: '700' },
-  toggleSub: { color: '#7f92aa', fontSize: 12, marginTop: 3, lineHeight: 16 },
+  modeChipOn: { borderColor: '#7cf9ff', backgroundColor: 'rgba(124,249,255,0.14)' },
+  modeChipText: { color: '#9fb3c8', fontSize: 13, fontWeight: '700' },
+  modeChipTextOn: { color: '#e6f1ff' },
+  modeDesc: { color: '#7f92aa', fontSize: 12, lineHeight: 16, marginBottom: 12, paddingHorizontal: 2 },
   list: { flexGrow: 0 },
   listContent: { paddingBottom: 8 },
   empty: { color: '#8aa0bd', fontSize: 14, lineHeight: 21, textAlign: 'center', paddingVertical: 28, paddingHorizontal: 8 },

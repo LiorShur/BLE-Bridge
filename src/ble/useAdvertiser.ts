@@ -10,7 +10,7 @@
  * NOTE: depends on React Native; not part of the pure-logic test suite.
  */
 import { useEffect, useRef } from 'react';
-import { useStore } from '../state/store';
+import { useStore, isBroadcasting } from '../state/store';
 import { encodePayload, FLAG_AVAILABLE, FLAG_LOOKING_TO_MEET } from './payload';
 import { bucketForPrimary } from '../discovery/interests';
 import { bytesToBase64 } from './base64';
@@ -70,7 +70,8 @@ export function useAdvertiser(
       const headingDecideg = headingDeg === null ? null : Math.round(headingDeg * 10) % 3600;
       const r = state.outgoingReaction;
       const a = state.outgoingAck;
-      const flags = FLAG_AVAILABLE | (state.lookingToMeet ? FLAG_LOOKING_TO_MEET : 0);
+      const broadcasting = isBroadcasting(state.visibility);
+      const flags = FLAG_AVAILABLE | (broadcasting ? FLAG_LOOKING_TO_MEET : 0);
       const bytes = encodePayload({
         version: 1,
         peerId: state.localPeerId,
@@ -85,8 +86,8 @@ export function useAdvertiser(
         reactionNonce: r?.nonce ?? 0,
         ackTarget: a?.targetPeerId ?? 0,
         ackNonce: a?.nonce ?? 0,
-        // Discovery hint: only meaningful when LOOKING; harmless otherwise.
-        interestBucket: state.lookingToMeet ? bucketForPrimary(state.myPrimaryInterest) : 0,
+        // Discovery hint: only meaningful when broadcasting; harmless otherwise.
+        interestBucket: broadcasting ? bucketForPrimary(state.myPrimaryInterest) : 0,
       });
       return bytesToBase64(bytes);
     };

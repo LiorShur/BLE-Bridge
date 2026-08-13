@@ -18,22 +18,23 @@
  * scoring/ranking it calls (match.ts) is separately unit tested.
  */
 import { useEffect } from 'react';
-import { useStore, type NearbyPerson } from '../state/store';
+import { useStore, isBrowsing, type NearbyPerson } from '../state/store';
 import { FLAG_LOOKING_TO_MEET } from '../ble/payload';
 import { computeMatch, isStrongMatch, rankCandidates } from './match';
 
 export function useDiscovery(): void {
   const bonds = useStore((s) => s.bonds);
   const profiles = useStore((s) => s.profiles);
-  const lookingToMeet = useStore((s) => s.lookingToMeet);
+  const visibility = useStore((s) => s.visibility);
   const myInterests = useStore((s) => s.myInterests);
 
   useEffect(() => {
     const setNearby = useStore.getState().setNearby;
-    if (!lookingToMeet) {
-      setNearby([]); // not looking → invisible to others AND no list of our own
+    if (!isBrowsing(visibility)) {
+      setNearby([]); // 'off' → no browsing (and, being off, invisible too)
       return;
     }
+    // In 'ghost' we browse without broadcasting; open/curious do both.
 
     const candidates = bonds
       .filter((b) => b.peer && (b.peer.flags & FLAG_LOOKING_TO_MEET) !== 0)
@@ -65,5 +66,5 @@ export function useDiscovery(): void {
     }));
 
     setNearby(nearby);
-  }, [bonds, profiles, lookingToMeet, myInterests]);
+  }, [bonds, profiles, visibility, myInterests]);
 }

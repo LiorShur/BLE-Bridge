@@ -103,6 +103,12 @@ export interface ProfileEntry {
   triedAt?: number;
 }
 
+// Visibility semantics live in a pure, tested module; re-exported here so callers
+// can keep importing them from the store alongside the state they gate.
+export { isBroadcasting, isBrowsing, showsNudges } from '../discovery/visibility';
+export type { Visibility } from '../discovery/visibility';
+import type { Visibility } from '../discovery/visibility';
+
 /** One ranked person in the "someone nearby you should meet" list (DISCOVERY_SPEC). */
 export interface NearbyPerson {
   peerId: number;
@@ -176,11 +182,11 @@ export interface AppState {
   /** Active interest catalog id (per-event customization; generic by default). */
   activeCatalogId: string;
   /**
-   * Discovery mode: broadcast LOOKING_TO_MEET and surface nearby matches. OFF by
-   * default (opt-in each session, DISCOVERY_SPEC §6). Reciprocity: you only see
-   * others while you are also looking.
+   * Discovery visibility mode (off/open/curious/ghost — see {@link Visibility}).
+   * OFF by default. Replaces the old boolean; the wire still carries only the
+   * single LOOKING_TO_MEET bit, set when the mode {@link isBroadcasting}.
    */
-  lookingToMeet: boolean;
+  visibility: Visibility;
   /** Ranked nearby people who are also looking (written by useDiscovery). */
   nearby: NearbyPerson[];
   /** Whether the "People nearby" sheet is open. */
@@ -200,8 +206,8 @@ export interface AppState {
   setMyDiscovery: (interests: string[], primaryInterest: string | null, headline: string | null) => void;
   /** Choose the active interest catalog (per-event customization). */
   setActiveCatalog: (id: string) => void;
-  /** Turn discovery mode on/off (broadcasts LOOKING_TO_MEET, surfaces matches). */
-  setLookingToMeet: (enabled: boolean) => void;
+  /** Set the discovery visibility mode (off/open/curious/ghost). */
+  setVisibility: (mode: Visibility) => void;
   /** Replace the ranked nearby list (written each discovery pass). */
   setNearby: (people: NearbyPerson[]) => void;
   /** Open/close the "People nearby" sheet. */
@@ -278,7 +284,7 @@ export const useStore = create<AppState>((set) => {
     myPrimaryInterest: null,
     myHeadline: null,
     activeCatalogId: DEFAULT_CATALOG_ID,
-    lookingToMeet: false,
+    visibility: 'off',
     nearby: [],
     nearbyOpen: false,
     hudVisible: false,
@@ -327,7 +333,7 @@ export const useStore = create<AppState>((set) => {
     setMyDiscovery: (interests, primaryInterest, headline) =>
       set({ myInterests: interests, myPrimaryInterest: primaryInterest, myHeadline: headline }),
     setActiveCatalog: (id) => set({ activeCatalogId: id }),
-    setLookingToMeet: (enabled) => set({ lookingToMeet: enabled }),
+    setVisibility: (mode) => set({ visibility: mode }),
     setNearby: (people) => set({ nearby: people }),
     setNearbyOpen: (open) => set({ nearbyOpen: open }),
     toggleHud: () => set((s) => ({ hudVisible: !s.hudVisible })),

@@ -23,7 +23,7 @@ import { OnboardingScreen } from './screens/OnboardingScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
 import { requestAllPermissions } from './permissions';
 import { isSupported, type SupportReport } from './ble/advertiser';
-import { useStore } from './state/store';
+import { useStore, isBrowsing, showsNudges, type Visibility } from './state/store';
 import { useCompassHeading } from './sensors/useCompassHeading';
 import { useAdvertiser } from './ble/useAdvertiser';
 import { useIosPeripheral } from './ble/useIosPeripheral';
@@ -39,8 +39,9 @@ function MainExperience(): React.ReactElement {
   const toggleHud = useStore((s) => s.toggleHud);
   const gattEnabled = useStore((s) => s.gattEnabled);
   const setNearbyOpen = useStore((s) => s.setNearbyOpen);
-  const lookingToMeet = useStore((s) => s.lookingToMeet);
+  const visibility = useStore((s) => s.visibility);
   const strongCount = useStore((s) => s.nearby.filter((n) => n.strong).length);
+  const browsing = isBrowsing(visibility);
 
   // Mount the full signal stack. On iOS (P-i2a) there's no native advertiser yet,
   // so advertising is not mounted — the iPhone participates as a GATT central and
@@ -62,11 +63,11 @@ function MainExperience(): React.ReactElement {
       {/* Discovery entry point (top-left): opens the "People nearby" sheet. Shows
           a badge when strong matches are present. Dimmed while discovery is off. */}
       <Pressable
-        style={[styles.nearbyTab, lookingToMeet ? styles.nearbyTabOn : null]}
+        style={[styles.nearbyTab, browsing ? styles.nearbyTabOn : null]}
         onPress={() => setNearbyOpen(true)}
       >
-        <Text style={styles.nearbyTabText}>{lookingToMeet ? '✨ Nearby' : '✨ Meet'}</Text>
-        {strongCount > 0 ? (
+        <Text style={styles.nearbyTabText}>{browsing ? '✨ Nearby' : '✨ Meet'}</Text>
+        {showsNudges(visibility) && strongCount > 0 ? (
           <View style={styles.nearbyBadge}>
             <Text style={styles.nearbyBadgeText}>{strongCount}</Text>
           </View>
@@ -100,6 +101,7 @@ export default function App(): React.ReactElement {
     store.setMyProfile(mine.name, mine.photoURL);
     store.setMyDiscovery(mine.interests, mine.primaryInterest, mine.headline);
     if (mine.activeCatalogId) store.setActiveCatalog(mine.activeCatalogId);
+    if (mine.visibility) store.setVisibility(mine.visibility as Visibility);
 
     const perms = await requestAllPermissions();
     if (!perms.granted) {
