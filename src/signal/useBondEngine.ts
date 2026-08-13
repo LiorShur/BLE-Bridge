@@ -21,6 +21,7 @@ import { GattClient } from '../ble/gatt/gattClient';
 import { GattMessaging } from '../ble/gatt/gattMessaging';
 import { MSG_TYPE } from '../ble/gatt/messaging';
 import { utf8Encode, utf8Decode } from '../ble/gatt/utf8';
+import { encodeProfile, decodeProfile } from '../ble/gatt/profileCodec';
 import { useStore } from '../state/store';
 import { Sound } from '../audio/sound';
 import {
@@ -88,6 +89,11 @@ export function useBondEngine(
   const managerRef = useRef<BleManager | null>(null);
   const scannerRef = useRef<BleScanner | null>(null);
   const gattRef = useRef<GattClient | null>(null);
+  const messagingRef = useRef<GattMessaging | null>(null);
+  // Peers we've already sent our profile to (per profile version); cleared when
+  // our own profile changes so it re-sends.
+  const sentProfileTo = useRef<Set<number>>(new Set());
+  const lastProfileSig = useRef('');
   const localPeerIdRef = useRef(0);
   const lastObsAt = useRef(0);
   const lastScanStartAt = useRef(0);
@@ -216,6 +222,32 @@ export function useBondEngine(
         store.setGattStatus({ connections: gatt.activeCount() });
       }
 
+      // Serverless profile exchange (GATT_MESSAGING_SPEC §3): once bonded, push my
+      // profile to each peer over GATT so they learn my name/interests with no
+      // backend. Sent once per peer per profile-version; a no-op where there's no
+      // GATT link (Android↔Android), where Firebase still covers it.
+      const messaging = messagingRef.current;
+      if (messaging && store.myName) {
+        const sig = `${store.myName}|${store.myInterests.join(',')}|${store.myHeadline ?? ''}`;
+        if (sig !== lastProfileSig.current) {
+          lastProfileSig.current = sig;
+          sentProfileTo.current.clear(); // my profile changed → re-send to all
+        }
+        let bytes: Uint8Array | null = null;
+        for (const [pid, state] of peers.current) {
+          if (!state.machine.bonded || sentProfileTo.current.has(pid)) continue;
+          if (!bytes) {
+            bytes = encodeProfile({
+              name: store.myName,
+              interests: store.myInterests,
+              ...(store.myHeadline ? { headline: store.myHeadline } : {}),
+            });
+          }
+          messaging.send(pid, MSG_TYPE.PROFILE, bytes);
+          sentProfileTo.current.add(pid);
+        }
+      }
+
       if (now - lastObsAt.current > SCAN_SILENCE_MS && now - lastScanStartAt.current > SCAN_RESTART_COOLDOWN_MS) {
         scanner.stop();
         startScan(now);
@@ -248,15 +280,20 @@ export function useBondEngine(
     // Messaging (GATT_MESSAGING_SPEC): inbound text → chat store; register the
     // outbound sender so the store's sendChat reaches the transport.
     const messaging = new GattMessaging(gatt, () => useStore.getState().localPeerId);
+    messagingRef.current = messaging;
     messaging.onMessage((peerId, type, content) => {
+      const store = useStore.getState();
       if (type === MSG_TYPE.TEXT) {
-        const store = useStore.getState();
         store.pushChatMessage(peerId, 'them', utf8Decode(content));
         // If this peer's chat isn't open, cue the user: a sound + an unread badge.
         if (store.chatPeerId !== peerId) {
           Sound.receive();
           store.bumpUnread(peerId);
         }
+      } else if (type === MSG_TYPE.PROFILE) {
+        // Serverless identity: a peer sent us their name/interests over GATT.
+        const p = decodeProfile(content);
+        if (p) store.setPeerProfileFromGatt(peerId, p);
       }
     });
     useStore.getState().registerChatSender((peerId, text) => messaging.send(peerId, MSG_TYPE.TEXT, utf8Encode(text)));
@@ -264,6 +301,8 @@ export function useBondEngine(
     return () => {
       useStore.getState().registerChatSender(null);
       messaging.stop();
+      messagingRef.current = null;
+      sentProfileTo.current.clear();
       gatt.stop();
       if (gattRef.current === gatt) gattRef.current = null;
       useStore.getState().setGattStatus({ connections: 0 });

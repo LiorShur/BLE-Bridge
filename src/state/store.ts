@@ -99,6 +99,8 @@ export interface ProfileEntry {
   interests?: string[];
   /** Optional one-line headline. */
   headline?: string;
+  /** Where this entry came from — a peer-supplied GATT profile is authoritative. */
+  source?: 'gatt' | 'firebase';
   /** When this lookup was last attempted (ms), so 'missing' can be retried. */
   triedAt?: number;
 }
@@ -214,6 +216,8 @@ export interface AppState {
   setLocalHeading: (headingDeg: number | null, accuracy: number) => void;
   /** Record a peer profile lookup result (or its in-flight/absent status). */
   setProfileEntry: (peerId: number, entry: ProfileEntry) => void;
+  /** Apply a peer-supplied profile received over GATT (authoritative; no backend). */
+  setPeerProfileFromGatt: (peerId: number, p: { name: string; interests: string[]; headline?: string }) => void;
   /** Set the local user's own profile (name + optional photo). */
   setMyProfile: (name: string | null, photoURL: string | null) => void;
   /** Set the local user's own discovery profile (interests + primary + headline). */
@@ -362,6 +366,25 @@ export const useStore = create<AppState>((set, get) => {
     clearOutgoingAck: () => set({ outgoingAck: null }),
     setProfileEntry: (peerId, entry) =>
       set((s) => ({ profiles: { ...s.profiles, [peerId >>> 0]: entry } })),
+    setPeerProfileFromGatt: (peerId, p) =>
+      set((s) => {
+        const key = peerId >>> 0;
+        const prev = s.profiles[key];
+        return {
+          profiles: {
+            ...s.profiles,
+            [key]: {
+              status: 'loaded',
+              name: p.name,
+              // Keep any photo already fetched from Firebase; GATT carries no photo.
+              photoURL: prev?.photoURL ?? null,
+              interests: p.interests,
+              ...(p.headline ? { headline: p.headline } : {}),
+              source: 'gatt',
+            },
+          },
+        };
+      }),
     setMyProfile: (name, photoURL) => set({ myName: name, myPhotoURL: photoURL }),
     setMyDiscovery: (interests, primaryInterest, headline) =>
       set({ myInterests: interests, myPrimaryInterest: primaryInterest, myHeadline: headline }),

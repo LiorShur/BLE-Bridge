@@ -177,11 +177,16 @@ Types are a small enum so unknown types are ignored forward-compatibly.
     `gattClient` learns peerId↔deviceId (`deviceIdForPeer`) for routing.
   - ✅ `utf8.ts`: a pure UTF-8 codec (Hermes lacks a reliable TextEncoder),
     unit-tested against the platform encoder.
-- **M3 — chat UI.** ✅ `features/chat/ChatSheet.tsx` — per-peer history + composer,
-  opened from a bonded peer's card; `store.sendChat` shows the line optimistically
-  and hands it to the transport; inbound text lands via `useBondEngine`. Serverless
-  **profile-over-GATT** (PROFILE type into the `profiles` cache) is scaffolded by
-  the protocol but not yet wired to the UI — a small follow-up.
+- **M3 — chat UI + profile-over-GATT.** ✅ `features/chat/ChatSheet.tsx` — per-peer
+  history + composer, opened from a bonded peer's card; `store.sendChat` shows the
+  line optimistically and hands it to the transport; inbound text lands via
+  `useBondEngine`, notifying (sound + 💬 badge) when the chat is closed.
+  ✅ **Serverless profile-over-GATT** (`profileCodec.ts`, pure + tested): on bond,
+  `useBondEngine` sends my name/interests/headline as a PROFILE message (once per
+  peer per profile-version); the receiver applies it via `setPeerProfileFromGatt`,
+  which is authoritative — `useProfiles` won't let a Firebase result overwrite a
+  GATT-supplied profile. This gives peers your identity **with no backend**, and
+  fixes the iOS case where the Firebase JS SDK's anonymous auth fails to sign in.
 
 ### Known limitation
 Messaging needs a GATT connection, so it works **iPhone↔Android** and

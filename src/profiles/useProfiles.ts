@@ -35,6 +35,9 @@ export function useProfiles(): void {
       }
       setProfileEntry(peerId, { status: 'loading', triedAt: now });
       void fetchProfile(peerId).then((p) => {
+        // A profile received directly from the peer over GATT is authoritative —
+        // never let a Firebase 'missing' (or a slower fetch) overwrite it.
+        if (useStore.getState().profiles[peerId]?.source === 'gatt') return;
         useStore.getState().setProfileEntry(
           peerId,
           p
@@ -42,6 +45,7 @@ export function useProfiles(): void {
                 status: 'loaded',
                 name: p.name,
                 photoURL: p.photoURL,
+                source: 'firebase',
                 // Discovery fields (DISCOVERY_SPEC): cached so useDiscovery can
                 // match without a second fetch. Absent when the peer set none.
                 ...(p.interests ? { interests: p.interests } : {}),
