@@ -183,6 +183,9 @@ export interface AppState {
   myName: string | null;
   /** The local user's own photo URL (null = none). */
   myPhotoURL: string | null;
+  /** Small photo thumbnail as raw base64 (no data: prefix) for GATT profile
+   *  exchange — works even when the Firebase photo upload fails (e.g. iOS). */
+  myPhotoThumb: string | null;
   /** The local user's own discovery interest tag ids. */
   myInterests: string[];
   /** The local user's primary interest (its bucket rides the wire); null = none. */
@@ -218,6 +221,10 @@ export interface AppState {
   setProfileEntry: (peerId: number, entry: ProfileEntry) => void;
   /** Apply a peer-supplied profile received over GATT (authoritative; no backend). */
   setPeerProfileFromGatt: (peerId: number, p: { name: string; interests: string[]; headline?: string }) => void;
+  /** Apply a peer's photo received over GATT (a data: URI), merged into its entry. */
+  setPeerPhotoFromGatt: (peerId: number, dataUri: string) => void;
+  /** Set my own photo thumbnail (raw base64) for GATT exchange. */
+  setMyPhotoThumb: (base64: string | null) => void;
   /** Set the local user's own profile (name + optional photo). */
   setMyProfile: (name: string | null, photoURL: string | null) => void;
   /** Set the local user's own discovery profile (interests + primary + headline). */
@@ -314,6 +321,7 @@ export const useStore = create<AppState>((set, get) => {
     profiles: {},
     myName: null,
     myPhotoURL: null,
+    myPhotoThumb: null,
     myInterests: [],
     myPrimaryInterest: null,
     myHeadline: null,
@@ -385,6 +393,18 @@ export const useStore = create<AppState>((set, get) => {
           },
         };
       }),
+    setPeerPhotoFromGatt: (peerId, dataUri) =>
+      set((s) => {
+        const key = peerId >>> 0;
+        const prev = s.profiles[key];
+        // Merge the photo into an existing entry, or start a minimal GATT entry
+        // (the name PROFILE message usually arrives first and fills the rest).
+        const entry: ProfileEntry = prev
+          ? { ...prev, photoURL: dataUri }
+          : { status: 'loaded', photoURL: dataUri, source: 'gatt' };
+        return { profiles: { ...s.profiles, [key]: entry } };
+      }),
+    setMyPhotoThumb: (base64) => set({ myPhotoThumb: base64 }),
     setMyProfile: (name, photoURL) => set({ myName: name, myPhotoURL: photoURL }),
     setMyDiscovery: (interests, primaryInterest, headline) =>
       set({ myInterests: interests, myPrimaryInterest: primaryInterest, myHeadline: headline }),

@@ -22,6 +22,7 @@ import { GattMessaging } from '../ble/gatt/gattMessaging';
 import { MSG_TYPE } from '../ble/gatt/messaging';
 import { utf8Encode, utf8Decode } from '../ble/gatt/utf8';
 import { encodeProfile, decodeProfile } from '../ble/gatt/profileCodec';
+import { base64ToBytes, bytesToBase64 } from '../ble/base64';
 import { useStore } from '../state/store';
 import { Sound } from '../audio/sound';
 import {
@@ -94,6 +95,8 @@ export function useBondEngine(
   // our own profile changes so it re-sends.
   const sentProfileTo = useRef<Set<number>>(new Set());
   const lastProfileSig = useRef('');
+  const sentPhotoTo = useRef<Set<number>>(new Set());
+  const lastPhotoSig = useRef('');
   const localPeerIdRef = useRef(0);
   const lastObsAt = useRef(0);
   const lastScanStartAt = useRef(0);
@@ -248,6 +251,23 @@ export function useBondEngine(
         }
       }
 
+      // Photo thumbnail — a separate, larger PHOTO message (paced by the transport)
+      // so the tiny name PROFILE still shows instantly and the avatar fills in after.
+      if (messaging && store.myPhotoThumb) {
+        const psig = String(store.myPhotoThumb.length);
+        if (psig !== lastPhotoSig.current) {
+          lastPhotoSig.current = psig;
+          sentPhotoTo.current.clear();
+        }
+        let photoBytes: Uint8Array | null = null;
+        for (const [pid, state] of peers.current) {
+          if (!state.machine.bonded || sentPhotoTo.current.has(pid)) continue;
+          if (!photoBytes) photoBytes = base64ToBytes(store.myPhotoThumb);
+          messaging.send(pid, MSG_TYPE.PHOTO, photoBytes);
+          sentPhotoTo.current.add(pid);
+        }
+      }
+
       if (now - lastObsAt.current > SCAN_SILENCE_MS && now - lastScanStartAt.current > SCAN_RESTART_COOLDOWN_MS) {
         scanner.stop();
         startScan(now);
@@ -294,6 +314,9 @@ export function useBondEngine(
         // Serverless identity: a peer sent us their name/interests over GATT.
         const p = decodeProfile(content);
         if (p) store.setPeerProfileFromGatt(peerId, p);
+      } else if (type === MSG_TYPE.PHOTO) {
+        // Serverless avatar: raw JPEG bytes → a data: URI the UI can render.
+        store.setPeerPhotoFromGatt(peerId, `data:image/jpeg;base64,${bytesToBase64(content)}`);
       }
     });
     useStore.getState().registerChatSender((peerId, text) => messaging.send(peerId, MSG_TYPE.TEXT, utf8Encode(text)));
@@ -303,6 +326,7 @@ export function useBondEngine(
       messaging.stop();
       messagingRef.current = null;
       sentProfileTo.current.clear();
+      sentPhotoTo.current.clear();
       gatt.stop();
       if (gattRef.current === gatt) gattRef.current = null;
       useStore.getState().setGattStatus({ connections: 0 });

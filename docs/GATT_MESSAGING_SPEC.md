@@ -187,6 +187,13 @@ Types are a small enum so unknown types are ignored forward-compatibly.
   which is authoritative — `useProfiles` won't let a Firebase result overwrite a
   GATT-supplied profile. This gives peers your identity **with no backend**, and
   fixes the iOS case where the Firebase JS SDK's anonymous auth fails to sign in.
+  ✅ **Photo-over-GATT**: a small 256px/q0.5 thumbnail (captured at pick time as
+  base64, ~10–25 KB) is sent as a **separate** PHOTO message so the tiny name
+  PROFILE still arrives instantly and the avatar fills in after. The receiver turns
+  the raw bytes into a `data:` URI. Outbound frames are **paced** (one per ~12 ms,
+  `gattMessaging.ts`) so a multi-frame photo doesn't overrun the BLE buffer; a
+  single-frame text/ack is unaffected. Large-photo reliability may still want
+  flow-control tuning on some radios.
 
 ### Known limitation
 Messaging needs a GATT connection, so it works **iPhone↔Android** and

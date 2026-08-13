@@ -101,6 +101,7 @@ export default function App(): React.ReactElement {
     store.setLocalPeerId(peerId);
     const mine = await loadMyProfile();
     store.setMyProfile(mine.name, mine.photoURL);
+    store.setMyPhotoThumb(mine.photoThumb);
     store.setMyDiscovery(mine.interests, mine.primaryInterest, mine.headline);
     if (mine.activeCatalogId) store.setActiveCatalog(mine.activeCatalogId);
     if (mine.visibility) store.setVisibility(mine.visibility as Visibility);

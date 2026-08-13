@@ -41,6 +41,10 @@ import { notifyIosMessage, onIosPeripheralMessage, onIosPeripheralMtu } from './
 
 const PUMP_MS = 300;
 const DEFAULT_MTU = 23;
+// Pace outbound frames so a multi-frame message (e.g. a photo, ~40–80 frames)
+// doesn't overrun the BLE transmit buffer and silently drop frames. One frame per
+// this interval. A single-frame text/ack is unaffected in practice.
+const FRAME_GAP_MS = 12;
 
 export type MessageHandler = (peerId: number, type: number, content: Uint8Array) => void;
 
@@ -54,6 +58,9 @@ export class GattMessaging {
   private nextMsgId = 1;
   private onMessageCb?: MessageHandler;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private drainTimer: ReturnType<typeof setInterval> | null = null;
+  // Paced outbound frame queue (message frames only; acks go immediately).
+  private outFrames: { peerId: number; b64: string }[] = [];
   private subs: EmitterSubscription[] = [];
 
   constructor(client: GattClient, localPeerId: () => number) {
@@ -70,6 +77,7 @@ export class GattMessaging {
     this.pushSub(onIosPeripheralMtu((mtu) => (this.peripheralMtu = Math.max(this.peripheralMtu, mtu))));
 
     this.timer = setInterval(() => this.pump(Date.now()), PUMP_MS);
+    this.drainTimer = setInterval(() => this.drainOneFrame(), FRAME_GAP_MS);
   }
 
   onMessage(cb: MessageHandler): void {
@@ -89,7 +97,10 @@ export class GattMessaging {
 
   stop(): void {
     if (this.timer) clearInterval(this.timer);
+    if (this.drainTimer) clearInterval(this.drainTimer);
     this.timer = null;
+    this.drainTimer = null;
+    this.outFrames = [];
     for (const s of this.subs) s.remove();
     this.subs = [];
     this.reassemblers.clear();
@@ -118,13 +129,20 @@ export class GattMessaging {
     for (const s of send) {
       const peerId = this.targets.get(s.msgId);
       if (peerId === undefined) continue;
-      for (const frame of s.frames) this.sendFrameTo(peerId, bytesToBase64(frame));
+      // Enqueue frames for paced sending rather than bursting them all at once.
+      for (const frame of s.frames) this.outFrames.push({ peerId, b64: bytesToBase64(frame) });
     }
     for (const msgId of failed) this.targets.delete(msgId);
   }
 
+  /** Send one queued frame per tick — the pacing that keeps large messages intact. */
+  private drainOneFrame(): void {
+    const next = this.outFrames.shift();
+    if (next) this.writeFrameTo(next.peerId, next.b64);
+  }
+
   /** Route one frame to a peer: central write if we dialed it, else peripheral notify. */
-  private sendFrameTo(peerId: number, b64: string): void {
+  private writeFrameTo(peerId: number, b64: string): void {
     const deviceId = this.client.deviceIdForPeer(peerId);
     if (deviceId) {
       void this.client.writeMessageFrame(deviceId, b64);

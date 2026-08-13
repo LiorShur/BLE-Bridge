@@ -16,6 +16,7 @@ import { generatePeerId, PEER_ID_UNSET } from '../ble/identity';
 const PEER_ID_KEY = 'aurabridge.peerId';
 const MY_NAME_KEY = 'aurabridge.profile.name';
 const MY_PHOTO_KEY = 'aurabridge.profile.photoURL';
+const MY_PHOTO_THUMB_KEY = 'aurabridge.profile.photoThumb';
 const MY_INTERESTS_KEY = 'aurabridge.profile.interests';
 const MY_PRIMARY_KEY = 'aurabridge.profile.primaryInterest';
 const MY_HEADLINE_KEY = 'aurabridge.profile.headline';
@@ -45,6 +46,8 @@ export async function loadOrCreatePeerId(): Promise<number> {
 export interface StoredProfile {
   name: string | null;
   photoURL: string | null;
+  /** Small photo thumbnail as raw base64, for GATT profile exchange. */
+  photoThumb: string | null;
   /** Discovery interest tag ids (catalog: src/discovery/interests.ts). */
   interests: string[];
   /** The primary interest whose bucket rides the wire (null = none). */
@@ -60,15 +63,17 @@ export interface StoredProfile {
 /** Load the local user's own saved profile (for prefilling the setup screen). */
 export async function loadMyProfile(): Promise<StoredProfile> {
   try {
-    const [name, photoURL, interestsRaw, primaryInterest, headline, activeCatalogId, visibility] = await Promise.all([
-      AsyncStorage.getItem(MY_NAME_KEY),
-      AsyncStorage.getItem(MY_PHOTO_KEY),
-      AsyncStorage.getItem(MY_INTERESTS_KEY),
-      AsyncStorage.getItem(MY_PRIMARY_KEY),
-      AsyncStorage.getItem(MY_HEADLINE_KEY),
-      AsyncStorage.getItem(MY_CATALOG_KEY),
-      AsyncStorage.getItem(MY_VISIBILITY_KEY),
-    ]);
+    const [name, photoURL, interestsRaw, primaryInterest, headline, activeCatalogId, visibility, photoThumb] =
+      await Promise.all([
+        AsyncStorage.getItem(MY_NAME_KEY),
+        AsyncStorage.getItem(MY_PHOTO_KEY),
+        AsyncStorage.getItem(MY_INTERESTS_KEY),
+        AsyncStorage.getItem(MY_PRIMARY_KEY),
+        AsyncStorage.getItem(MY_HEADLINE_KEY),
+        AsyncStorage.getItem(MY_CATALOG_KEY),
+        AsyncStorage.getItem(MY_VISIBILITY_KEY),
+        AsyncStorage.getItem(MY_PHOTO_THUMB_KEY),
+      ]);
     let interests: string[] = [];
     if (interestsRaw) {
       try {
@@ -81,6 +86,7 @@ export async function loadMyProfile(): Promise<StoredProfile> {
     return {
       name: name ?? null,
       photoURL: photoURL ?? null,
+      photoThumb: photoThumb || null,
       interests,
       primaryInterest: primaryInterest || null,
       headline: headline || null,
@@ -88,7 +94,16 @@ export async function loadMyProfile(): Promise<StoredProfile> {
       visibility: visibility && VALID_VISIBILITY.has(visibility) ? visibility : null,
     };
   } catch {
-    return { name: null, photoURL: null, interests: [], primaryInterest: null, headline: null, activeCatalogId: null, visibility: null };
+    return {
+      name: null,
+      photoURL: null,
+      photoThumb: null,
+      interests: [],
+      primaryInterest: null,
+      headline: null,
+      activeCatalogId: null,
+      visibility: null,
+    };
   }
 }
 
@@ -98,6 +113,7 @@ export async function saveMyProfileLocal(profile: StoredProfile): Promise<void> 
     await AsyncStorage.multiSet([
       [MY_NAME_KEY, profile.name ?? ''],
       [MY_PHOTO_KEY, profile.photoURL ?? ''],
+      [MY_PHOTO_THUMB_KEY, profile.photoThumb ?? ''],
       [MY_INTERESTS_KEY, JSON.stringify(profile.interests ?? [])],
       [MY_PRIMARY_KEY, profile.primaryInterest ?? ''],
       [MY_HEADLINE_KEY, profile.headline ?? ''],

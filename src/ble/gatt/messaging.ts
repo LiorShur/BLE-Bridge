@@ -25,6 +25,9 @@ export const MSG_TYPE = {
   TEXT: 1,
   PROFILE: 2,
   ACK: 3,
+  /** A small profile photo thumbnail (raw JPEG bytes), sent as a separate message
+   *  so the tiny name/interests PROFILE still arrives instantly. */
+  PHOTO: 4,
 } as const;
 export type MsgType = (typeof MSG_TYPE)[keyof typeof MSG_TYPE];
 

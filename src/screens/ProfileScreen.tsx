@@ -23,11 +23,13 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
   const localPeerId = useStore((s) => s.localPeerId);
   const myName = useStore((s) => s.myName);
   const myPhotoURL = useStore((s) => s.myPhotoURL);
+  const myPhotoThumb = useStore((s) => s.myPhotoThumb);
   const myInterests = useStore((s) => s.myInterests);
   const myHeadline = useStore((s) => s.myHeadline);
   const storedVisibility = useStore((s) => s.visibility);
   const storedCatalogId = useStore((s) => s.activeCatalogId);
   const setMyProfile = useStore((s) => s.setMyProfile);
+  const setMyPhotoThumb = useStore((s) => s.setMyPhotoThumb);
   const setMyDiscovery = useStore((s) => s.setMyDiscovery);
   const setVisibility = useStore((s) => s.setVisibility);
   const setActiveCatalog = useStore((s) => s.setActiveCatalog);
@@ -37,6 +39,9 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
   // A locally-picked image (camera/gallery) not yet uploaded. Takes priority over
   // the pasted URL until saved.
   const [localUri, setLocalUri] = useState<string | null>(null);
+  // A small base64 thumbnail of the picked image, sent to peers over GATT
+  // (works even when the Firebase upload fails, e.g. on iOS).
+  const [photoB64, setPhotoB64] = useState<string | null>(myPhotoThumb ?? null);
   // Discovery: the active catalog (per-event), selected interest ids (selection
   // order preserved — the FIRST is the primary, whose bucket rides the wire),
   // headline, and the looking-to-meet switch.
@@ -70,13 +75,18 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
   const pick = (asset: Asset | undefined): void => {
     if (asset?.uri) {
       setLocalUri(asset.uri);
+      if (asset.base64) setPhotoB64(asset.base64); // small thumbnail for GATT
       setError(null);
     }
   };
 
+  // 256px / q0.5 keeps the base64 thumbnail small enough to send over GATT in ~1 s
+  // while staying crisp for the avatar/card; includeBase64 returns those bytes.
+  const PICK_OPTS = { mediaType: 'photo' as const, quality: 0.5, maxWidth: 256, maxHeight: 256, includeBase64: true };
+
   const takeSelfie = async (): Promise<void> => {
     try {
-      const res = await launchCamera({ mediaType: 'photo', cameraType: 'front', quality: 0.6, maxWidth: 512, maxHeight: 512, saveToPhotos: false });
+      const res = await launchCamera({ ...PICK_OPTS, cameraType: 'front', saveToPhotos: false });
       if (!res.didCancel && !res.errorCode) pick(res.assets?.[0]);
     } catch {
       /* camera unavailable/denied — ignore */
@@ -85,7 +95,7 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
 
   const chooseFromGallery = async (): Promise<void> => {
     try {
-      const res = await launchImageLibrary({ mediaType: 'photo', quality: 0.6, maxWidth: 512, maxHeight: 512, selectionLimit: 1 });
+      const res = await launchImageLibrary({ ...PICK_OPTS, selectionLimit: 1 });
       if (!res.didCancel && !res.errorCode) pick(res.assets?.[0]);
     } catch {
       /* picker unavailable — ignore */
@@ -114,12 +124,14 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
 
     const finalHeadline = headline.trim() || null;
     setMyProfile(finalName || null, finalPhoto);
+    setMyPhotoThumb(photoB64);
     setMyDiscovery(interests, primaryInterest, finalHeadline);
     setActiveCatalog(catalogId);
     setVisibility(visibility);
     await saveMyProfileLocal({
       name: finalName || null,
       photoURL: finalPhoto,
+      photoThumb: photoB64,
       interests,
       primaryInterest,
       headline: finalHeadline,
