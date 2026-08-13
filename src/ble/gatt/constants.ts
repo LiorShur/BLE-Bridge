@@ -17,6 +17,13 @@ export const BRIDGE_SERVICE_UUID = 'a0e1b5d2-7c3f-4e8a-9b10-2f6c1d4e7a90';
  */
 export const PAYLOAD_CHAR_UUID = 'a0e1b5d2-7c3f-4e8a-9b10-2f6c1d4e7a91';
 
+/**
+ * Message characteristic (write + notify) for the Tier 2 messaging channel
+ * (docs/GATT_MESSAGING_SPEC.md). Central writes frames here; peripheral notifies
+ * frames back. Framed by src/ble/gatt/messaging.ts.
+ */
+export const MESSAGE_CHAR_UUID = 'a0e1b5d2-7c3f-4e8a-9b10-2f6c1d4e7a92';
+
 /** Canonical lower-case 128-bit UUID matcher (8-4-4-4-12 hex). */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
