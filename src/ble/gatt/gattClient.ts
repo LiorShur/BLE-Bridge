@@ -60,9 +60,20 @@ export class GattClient {
 
   // Inbound message frames from any connected peer's message characteristic.
   private onFrame?: (deviceId: string, frameBase64: string) => void;
+  // peerId → the deviceId we're connected to it on (learned from its payload).
+  private devicePeers = new Map<number, string>();
 
   constructor(manager: BleManager) {
     this.manager = manager;
+  }
+
+  /** The deviceId we hold a GATT link to for this peer, or null if none. */
+  deviceIdForPeer(peerId: number): string | null {
+    const deviceId = this.devicePeers.get(peerId >>> 0);
+    if (!deviceId) return null;
+    // Only report it if the link is actually live.
+    const live = this.deviceConns.has(deviceId) || [...this.conns.values()].some((c) => c.deviceId === deviceId);
+    return live ? deviceId : null;
   }
 
   /** Register the sink for inbound message frames (GATT_MESSAGING_SPEC). */
@@ -272,6 +283,9 @@ export class GattClient {
     if (!conn.lastBytes || conn.lastRssi == null) return; // need both a payload and an RSSI
     const payload = decodePayload(conn.lastBytes);
     if (!payload) return;
+    // Learn peerId↔deviceId so the messaging layer can route an outbound message
+    // (addressed by peerId) to the right connection (addressed by deviceId).
+    this.devicePeers.set(payload.peerId >>> 0, conn.deviceId);
     onObs({
       payload,
       headingDeg: headingToDegrees(payload.headingDecideg),

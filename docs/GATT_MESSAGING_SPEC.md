@@ -11,13 +11,12 @@ to exchange more than 24 bytes. Realistic ceiling: text/JSON instantly, small
 images (single-digit KB) in 1–4 s; NOT full photos/video (use a fat pipe or a
 backend relay for those — out of scope here).
 
-Status: **M0 spec + M1 pure protocol + M2 transport wiring built.** M1 (frame
-codec, reassembler) and the outbound reliability queue are unit-tested off-device;
-M2's native characteristic (Kotlin + Swift), the TS wrappers, and the central
-primitives (MTU + message subscribe/write) are in. The remaining M2 piece — the
-`GattMessaging` orchestration service that routes per-peer sends/receives and runs
-the retransmit loop — plus M3 (UI) are best iterated on two devices (like the
-interop itself), and are scoped below.
+Status: **M0–M3 code-complete; on-device validation pending.** The pure layers
+(frame codec, reassembler, outbound queue, envelope, UTF-8) are unit-tested; the
+native characteristic, wrappers, central primitives, the `GattMessaging`
+orchestration service, and a chat UI are all in. What remains is **tuning on two
+devices** — transport-choice edge cases, MTU behaviour, retransmit timing — which
+can only be observed on real radios (like the interop itself took several rounds).
 
 ---
 
@@ -164,13 +163,25 @@ Types are a small enum so unknown types are ignored forward-compatibly.
   - ✅ `gattClient.ts` central: `requestMTU(517)`, subscribe to the message
     characteristic (`setMessageSink`), `writeMessageFrame`, `peerMtu`.
   - ✅ `outbound.ts`: pure ack/retransmit `OutboundQueue`, unit-tested.
-  - ⏳ **`GattMessaging` service** — the remaining orchestration: one
-    `Reassembler` + `OutboundQueue` per peer, msgId allocation, choose transport
-    (central `writeMessageFrame` vs peripheral `notifyMessage`) per peer, a
-    retransmit tick, and deliver completed messages to the app. Needs two devices
-    to validate the transport choices and MTU behaviour.
-- **M3 — chat + profile-over-GATT UI.** Text chat; serverless profile exchange
-  into the existing `profiles` cache.
+  - ✅ **`GattMessaging` service** (`gattMessaging.ts`): per-channel `Reassembler`,
+    a global `OutboundQueue`, msgId allocation, a 4-byte sender-peerId **envelope**
+    (`messaging.ts`) so inbound frames identify their sender regardless of
+    transport, transport choice (central `writeMessageFrame` if we dialed the peer,
+    else peripheral `notifyMessage` broadcast), a retransmit tick, and ack/re-ack.
+    `gattClient` learns peerId↔deviceId (`deviceIdForPeer`) for routing.
+  - ✅ `utf8.ts`: a pure UTF-8 codec (Hermes lacks a reliable TextEncoder),
+    unit-tested against the platform encoder.
+- **M3 — chat UI.** ✅ `features/chat/ChatSheet.tsx` — per-peer history + composer,
+  opened from a bonded peer's card; `store.sendChat` shows the line optimistically
+  and hands it to the transport; inbound text lands via `useBondEngine`. Serverless
+  **profile-over-GATT** (PROFILE type into the `profiles` cache) is scaffolded by
+  the protocol but not yet wired to the UI — a small follow-up.
+
+### Known limitation
+Messaging needs a GATT connection, so it works **iPhone↔Android** and
+**iPhone↔iPhone**, NOT **Android↔Android** (connectionless by design — CLAUDE.md
+§3.1). The chat UI says so. Android↔Android chat would require re-enabling an
+Android↔Android GATT link (removed in the interop-always-on refactor).
 
 M1 is the whole hard, testable core — the part you cannot debug by looking at a
 phone — and lands first, exactly like `payload.ts` and the discovery brain did.

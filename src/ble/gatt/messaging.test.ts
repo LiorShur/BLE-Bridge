@@ -4,6 +4,8 @@ import {
   decodeFrame,
   frameMessage,
   ackFrame,
+  encodeEnvelope,
+  decodeEnvelope,
   Reassembler,
   MSG_TYPE,
   MSG_VERSION,
@@ -74,6 +76,39 @@ describe('frameMessage', () => {
 
   it('throws if the MTU cannot hold the header', () => {
     expect(() => frameMessage(MSG_TYPE.TEXT, 1, bytes('x'), FRAME_HEADER)).toThrow(RangeError);
+  });
+});
+
+describe('envelope', () => {
+  it('round-trips the sender peerId + content', () => {
+    const env = encodeEnvelope(0xa3f91c4e, bytes('hello'));
+    const { senderPeerId, content } = decodeEnvelope(env);
+    expect(senderPeerId >>> 0).toBe(0xa3f91c4e);
+    expect(dec.decode(content)).toBe('hello');
+  });
+
+  it('carries an empty content', () => {
+    const { senderPeerId, content } = decodeEnvelope(encodeEnvelope(7, new Uint8Array(0)));
+    expect(senderPeerId).toBe(7);
+    expect(content.length).toBe(0);
+  });
+
+  it('degrades to peerId 0 on a too-short buffer', () => {
+    expect(decodeEnvelope(new Uint8Array([1, 2])).senderPeerId).toBe(0);
+  });
+
+  it('survives a full frame round-trip (envelope → frames → reassemble → envelope)', () => {
+    const r = new Reassembler();
+    const env = encodeEnvelope(0x01020304, bytes('m'.repeat(300)));
+    const frames = frameMessage(MSG_TYPE.TEXT, 11, env, 60);
+    let done: ReturnType<Reassembler['ingest']> = null;
+    for (const f of frames) {
+      const res = r.ingest(f);
+      if (res?.message) done = res;
+    }
+    const { senderPeerId, content } = decodeEnvelope(done!.message!.bytes);
+    expect(senderPeerId >>> 0).toBe(0x01020304);
+    expect(dec.decode(content)).toBe('m'.repeat(300));
   });
 });
 

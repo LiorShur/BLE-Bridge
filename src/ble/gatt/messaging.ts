@@ -109,6 +109,27 @@ export function frameMessage(
   return frames;
 }
 
+/**
+ * Message envelope: a 4-byte big-endian sender peerId prefixed to the content,
+ * BEFORE chunking. Because inbound frames don't carry a peer identity at the
+ * transport layer (a peripheral notify is a broadcast; an iOS write has no stable
+ * sender handle), the envelope is how the receiver knows who sent a message
+ * regardless of which transport/connection delivered it (GATT_MESSAGING_SPEC).
+ */
+export function encodeEnvelope(senderPeerId: number, content: Uint8Array): Uint8Array {
+  const out = new Uint8Array(4 + content.length);
+  new DataView(out.buffer).setUint32(0, senderPeerId >>> 0, false);
+  out.set(content, 4);
+  return out;
+}
+
+/** Split a reassembled envelope back into its sender peerId and content. */
+export function decodeEnvelope(bytes: Uint8Array): { senderPeerId: number; content: Uint8Array } {
+  if (bytes.length < 4) return { senderPeerId: 0, content: bytes };
+  const senderPeerId = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, false);
+  return { senderPeerId, content: bytes.slice(4) };
+}
+
 /** A header-only ACK frame confirming receipt of `msgId`. */
 export function ackFrame(msgId: number): Uint8Array {
   return encodeFrame({ version: MSG_VERSION, type: MSG_TYPE.ACK, msgId, seq: 0, count: 0, payload: new Uint8Array(0) });

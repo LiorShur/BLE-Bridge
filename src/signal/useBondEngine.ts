@@ -18,6 +18,9 @@ import { useEffect, useRef } from 'react';
 import { BleManager } from 'react-native-ble-plx';
 import { BleScanner, type ScanObservation } from '../ble/scanner';
 import { GattClient } from '../ble/gatt/gattClient';
+import { GattMessaging } from '../ble/gatt/gattMessaging';
+import { MSG_TYPE } from '../ble/gatt/messaging';
+import { utf8Encode, utf8Decode } from '../ble/gatt/utf8';
 import { useStore } from '../state/store';
 import { Sound } from '../audio/sound';
 import {
@@ -241,7 +244,20 @@ export function useBondEngine(
     if (!manager) return; // main effect not mounted yet (shouldn't happen)
     const gatt = new GattClient(manager);
     gattRef.current = gatt;
+
+    // Messaging (GATT_MESSAGING_SPEC): inbound text → chat store; register the
+    // outbound sender so the store's sendChat reaches the transport.
+    const messaging = new GattMessaging(gatt, () => useStore.getState().localPeerId);
+    messaging.onMessage((peerId, type, content) => {
+      if (type === MSG_TYPE.TEXT) {
+        useStore.getState().pushChatMessage(peerId, 'them', utf8Decode(content));
+      }
+    });
+    useStore.getState().registerChatSender((peerId, text) => messaging.send(peerId, MSG_TYPE.TEXT, utf8Encode(text)));
+
     return () => {
+      useStore.getState().registerChatSender(null);
+      messaging.stop();
       gatt.stop();
       if (gattRef.current === gatt) gattRef.current = null;
       useStore.getState().setGattStatus({ connections: 0 });

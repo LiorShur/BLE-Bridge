@@ -31,6 +31,7 @@ import { useBondEngine } from './signal/useBondEngine';
 import { useProfiles } from './profiles/useProfiles';
 import { useDiscovery } from './discovery/useDiscovery';
 import { NearbySheet } from './features/nearby/NearbySheet';
+import { ChatSheet } from './features/chat/ChatSheet';
 import { loadOrCreatePeerId, loadMyProfile } from './identity/persistentId';
 
 type Phase = 'checking' | 'permsDenied' | 'capability' | 'onboarding' | 'profile' | 'ready';
@@ -78,6 +79,7 @@ function MainExperience(): React.ReactElement {
       <Pressable style={styles.hudTap} onLongPress={toggleHud} delayLongPress={600} />
       <DebugHUD />
       <NearbySheet />
+      <ChatSheet />
     </View>
   );
 }

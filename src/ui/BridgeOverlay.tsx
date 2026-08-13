@@ -360,6 +360,12 @@ function ProfileCard(): React.ReactElement | null {
   const name = profile?.status === 'loaded' && profile.name ? profile.name : shortPeerTag(expandedPeerId);
   const photoURL = profile?.status === 'loaded' ? profile.photoURL : null;
 
+  const openChat = (): void => {
+    const store = useStore.getState();
+    store.setExpandedPeer(null);
+    store.setChatPeer(expandedPeerId);
+  };
+
   return (
     <Modal visible transparent animationType="fade" onRequestClose={() => setExpandedPeer(null)} statusBarTranslucent>
       <Pressable style={styles.cardBackdrop} onPress={() => setExpandedPeer(null)}>
@@ -371,7 +377,11 @@ function ProfileCard(): React.ReactElement | null {
           )}
           <Text style={styles.cardName}>{name}</Text>
           <Text style={styles.cardTag}>{shortPeerTag(expandedPeerId)}</Text>
-          <Text style={styles.cardHint}>tap anywhere to close</Text>
+          {/* Tier 2 messaging entry point. */}
+          <Pressable style={[styles.cardChatBtn, { backgroundColor: hue }]} onPress={openChat}>
+            <Text style={styles.cardChatText}>💬 Message</Text>
+          </Pressable>
+          <Text style={styles.cardHint}>tap outside to close</Text>
         </View>
       </Pressable>
     </Modal>
@@ -426,7 +436,9 @@ const styles = StyleSheet.create({
   cardPhotoEmpty: { opacity: 0.85 },
   cardName: { color: '#e6f1ff', fontSize: 24, fontWeight: '700', marginTop: 18 },
   cardTag: { color: '#9fb3c8', fontSize: 14, marginTop: 4, letterSpacing: 1 },
-  cardHint: { color: '#5b6b82', fontSize: 12, marginTop: 18 },
+  cardChatBtn: { marginTop: 20, borderRadius: 12, paddingHorizontal: 22, paddingVertical: 11 },
+  cardChatText: { color: '#04203a', fontSize: 16, fontWeight: '800' },
+  cardHint: { color: '#5b6b82', fontSize: 12, marginTop: 14 },
   reticle: {
     position: 'absolute',
     width: 40,

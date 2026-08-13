@@ -109,6 +109,14 @@ export { isBroadcasting, isBrowsing, showsNudges } from '../discovery/visibility
 export type { Visibility } from '../discovery/visibility';
 import type { Visibility } from '../discovery/visibility';
 
+/** One line in a peer chat (GATT messaging channel, GATT_MESSAGING_SPEC). */
+export interface ChatMessage {
+  key: number;
+  from: 'me' | 'them';
+  text: string;
+  at: number;
+}
+
 /** One ranked person in the "someone nearby you should meet" list (DISCOVERY_SPEC). */
 export interface NearbyPerson {
   peerId: number;
@@ -191,6 +199,10 @@ export interface AppState {
   nearby: NearbyPerson[];
   /** Whether the "People nearby" sheet is open. */
   nearbyOpen: boolean;
+  /** Chat history per peer (GATT messaging channel). */
+  chats: Record<number, ChatMessage[]>;
+  /** Peer whose chat is open, or null. */
+  chatPeerId: number | null;
   hudVisible: boolean;
 
   setCapability: (report: SupportReport) => void;
@@ -212,6 +224,14 @@ export interface AppState {
   setNearby: (people: NearbyPerson[]) => void;
   /** Open/close the "People nearby" sheet. */
   setNearbyOpen: (open: boolean) => void;
+  /** Open a peer's chat (or close with null). */
+  setChatPeer: (peerId: number | null) => void;
+  /** Append a chat line for a peer. */
+  pushChatMessage: (peerId: number, from: 'me' | 'them', text: string) => void;
+  /** Send a chat message to a peer over the GATT channel (optimistically shown). */
+  sendChat: (peerId: number, text: string) => void;
+  /** The engine registers the transport sender here (null clears it). */
+  registerChatSender: (fn: ((peerId: number, text: string) => void) | null) => void;
   setTunable: <K extends keyof Tunables>(key: K, value: Tunables[K]) => void;
   setBond: (bond: BondState) => void;
   setBonds: (bonds: BondState[]) => void;
@@ -246,7 +266,13 @@ function hueForPeer(peerId: number): number {
   return peerId & 0xff;
 }
 
-export const useStore = create<AppState>((set) => {
+// Chat plumbing kept OUT of reactive state: a monotonic key source and the
+// imperative transport sender the signal engine registers (a function doesn't
+// belong in the reactive store).
+let chatKeySeq = 0;
+let chatSenderRef: ((peerId: number, text: string) => void) | null = null;
+
+export const useStore = create<AppState>((set, get) => {
   const localPeerId = getSessionPeerId();
   return {
     capability: null,
@@ -287,6 +313,8 @@ export const useStore = create<AppState>((set) => {
     visibility: 'off',
     nearby: [],
     nearbyOpen: false,
+    chats: {},
+    chatPeerId: null,
     hudVisible: false,
 
     setCapability: (report) => set({ capability: report }),
@@ -336,6 +364,22 @@ export const useStore = create<AppState>((set) => {
     setVisibility: (mode) => set({ visibility: mode }),
     setNearby: (people) => set({ nearby: people }),
     setNearbyOpen: (open) => set({ nearbyOpen: open }),
+    setChatPeer: (peerId) => set({ chatPeerId: peerId }),
+    pushChatMessage: (peerId, from, text) =>
+      set((s) => {
+        const key = (chatKeySeq += 1);
+        const prev = s.chats[peerId >>> 0] ?? [];
+        return { chats: { ...s.chats, [peerId >>> 0]: [...prev, { key, from, text, at: Date.now() }].slice(-200) } };
+      }),
+    sendChat: (peerId, text) => {
+      const t = text.trim();
+      if (!t) return;
+      get().pushChatMessage(peerId, 'me', t);
+      chatSenderRef?.(peerId >>> 0, t);
+    },
+    registerChatSender: (fn) => {
+      chatSenderRef = fn;
+    },
     toggleHud: () => set((s) => ({ hudVisible: !s.hudVisible })),
   };
 });
