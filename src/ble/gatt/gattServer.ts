@@ -72,20 +72,32 @@ export async function notifyGattMessage(frameBase64: string): Promise<void> {
   }
 }
 
+/** The BleGattServer emitter, or null (absent on iOS, or a stale Android build). */
+function serverEmitter(): NativeEventEmitter | null {
+  const raw = NativeModules.BleGattServer as { addListener?: unknown; removeListeners?: unknown } | undefined;
+  if (!raw) return null; // not present (e.g. iOS)
+  if (typeof raw.addListener !== 'function' || typeof raw.removeListeners !== 'function') {
+    // eslint-disable-next-line no-console
+    console.warn('BleGattServer is not an event emitter — messaging disabled. Rebuild the Android app clean.');
+    return null;
+  }
+  return new NativeEventEmitter(NativeModules.BleGattServer);
+}
+
 /** A central wrote a message frame to us (peripheral side). `device` is its address. */
 export function onGattServerMessage(cb: (device: string, frameBase64: string) => void): EmitterSubscription | null {
-  const m = mod();
-  if (!m) return null;
-  const emitter = new NativeEventEmitter(NativeModules.BleGattServer);
-  return emitter.addListener('BleGattServer:message', (e: { device: string; data: string }) =>
-    cb(e.device, e.data),
+  return (
+    serverEmitter()?.addListener('BleGattServer:message', (e: { device: string; data: string }) =>
+      cb(e.device, e.data),
+    ) ?? null
   );
 }
 
 /** A central negotiated an MTU — JS chunks outbound frames to it (minus 3). */
 export function onGattServerMtu(cb: (device: string, mtu: number) => void): EmitterSubscription | null {
-  const m = mod();
-  if (!m) return null;
-  const emitter = new NativeEventEmitter(NativeModules.BleGattServer);
-  return emitter.addListener('BleGattServer:mtu', (e: { device: string; mtu: number }) => cb(e.device, e.mtu));
+  return (
+    serverEmitter()?.addListener('BleGattServer:mtu', (e: { device: string; mtu: number }) =>
+      cb(e.device, e.mtu),
+    ) ?? null
+  );
 }

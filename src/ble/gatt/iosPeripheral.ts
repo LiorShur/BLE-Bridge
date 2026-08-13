@@ -72,18 +72,32 @@ export async function notifyIosMessage(frameBase64: string): Promise<void> {
   }
 }
 
+/**
+ * The BlePeripheral event emitter, or null with a CLEAR diagnostic if the native
+ * module is present but not an RCTEventEmitter — the tell-tale of a STALE iOS
+ * build (BlePeripheral not recompiled with messaging). Beats RN's cryptic
+ * "NativeEventEmitter … without the required addListener method" warning.
+ */
+function messageEmitter(): NativeEventEmitter | null {
+  const raw = NativeModules.BlePeripheral as { addListener?: unknown; removeListeners?: unknown } | undefined;
+  if (!raw) return null;
+  if (typeof raw.addListener !== 'function' || typeof raw.removeListeners !== 'function') {
+    // eslint-disable-next-line no-console
+    console.warn(
+      'BlePeripheral is not an event emitter — messaging is disabled. This is a STALE iOS build: ' +
+        'clean DerivedData + Clean Build Folder and rebuild (docs/GATT_MESSAGING_SPEC.md).',
+    );
+    return null;
+  }
+  return new NativeEventEmitter(NativeModules.BlePeripheral);
+}
+
 /** A central wrote a message frame to us (iPhone peripheral side). */
 export function onIosPeripheralMessage(cb: (frameBase64: string) => void): EmitterSubscription | null {
-  const m = mod();
-  if (!m) return null;
-  const emitter = new NativeEventEmitter(NativeModules.BlePeripheral);
-  return emitter.addListener('BlePeripheral:message', (e: { data: string }) => cb(e.data));
+  return messageEmitter()?.addListener('BlePeripheral:message', (e: { data: string }) => cb(e.data)) ?? null;
 }
 
 /** A central subscribed; `mtu` is the max notify size — JS chunks frames to it. */
 export function onIosPeripheralMtu(cb: (mtu: number) => void): EmitterSubscription | null {
-  const m = mod();
-  if (!m) return null;
-  const emitter = new NativeEventEmitter(NativeModules.BlePeripheral);
-  return emitter.addListener('BlePeripheral:mtu', (e: { mtu: number }) => cb(e.mtu));
+  return messageEmitter()?.addListener('BlePeripheral:mtu', (e: { mtu: number }) => cb(e.mtu)) ?? null;
 }
