@@ -75,6 +75,16 @@ export interface Interest {
 
 - ~40–60 tags for v0, grouped under ~12 buckets (Tech, Music, Sport, Outdoors,
   Art, Food, Games, Books, Film, Science, Business, Wellness…).
+
+**Per-event catalogs (built).** Buckets are ONE shared set (universal categories,
+so the wire hint means the same thing everywhere); each `Catalog` supplies a
+curated interest set that maps into those buckets. A device has an active catalog
+(`activeCatalogId`, generic by default, persisted). Interest `id`s are globally
+unique across catalogs (non-generic ones namespaced, e.g. `tc_ml`), so people only
+match within the same catalog — but lookups resolve against the UNION of all
+catalogs, so a peer's stored ids always render. Ships with `generic` +
+`tech-conf`; a real event adds its own `Catalog` entry. The profile screen shows a
+catalog picker when more than one exists.
 - `id` is permanent; labels/emoji can change. New tags append only.
 
 ### 2.3 The coarse `interestBucket` on the wire

@@ -1,15 +1,24 @@
 /**
- * Interest catalog for the discovery feature (docs/DISCOVERY_SPEC.md §2.2).
+ * Interest catalogs for the discovery feature (docs/DISCOVERY_SPEC.md §2.2).
  *
  * A curated, versioned taxonomy — mirrors src/reactions.ts. Interests are stored
  * on the backend profile by their stable `id` (never on the BLE wire; the payload
  * is full — DISCOVERY_SPEC §1). Only the coarse `bucket` of a user's PRIMARY
  * interest rides the wire, as the byte-23 pre-filter hint (payload.ts).
  *
+ * **Per-event catalogs.** There is ONE shared set of coarse {@link BUCKETS}
+ * (universal categories — so the wire hint means the same thing everywhere), and
+ * multiple {@link Catalog}s each supplying a curated interest set that maps into
+ * those buckets. A device picks an active catalog (generic by default; an event
+ * can ship its own). Matching is by interest `id`, which is globally unique across
+ * catalogs — so two people only match on ids they both hold, i.e. within the same
+ * catalog. Lookups (`interestById`, `normaliseInterests`, `bucketForPrimary`) work
+ * against the UNION of all catalogs, so a peer's stored ids always resolve.
+ *
  * PURE data + lookups, no I/O — unit tested. Rules:
- *   - `id` is permanent: never renumber or repurpose. New tags append only.
- *   - `bucket` is 1..255 (0 = unset on the wire); groups tags into coarse
- *     categories for the pre-filter. Labels/emoji may change freely.
+ *   - `id` is permanent AND globally unique across catalogs. Namespace non-generic
+ *     catalogs (e.g. `tc_ai`). Never renumber or repurpose. Append only.
+ *   - `bucket` is 1..255 (0 = unset on the wire) and SHARED across catalogs.
  */
 
 /** A coarse category; its numeric id is what a user's PRIMARY tag puts on the wire. */
@@ -44,7 +53,7 @@ export const BUCKETS: readonly Bucket[] = [
   { id: 12, label: 'Wellness', emoji: '🧘' },
 ] as const;
 
-export const INTERESTS: readonly Interest[] = [
+const GENERIC_INTERESTS: readonly Interest[] = [
   // Tech (1)
   { id: 'ai', label: 'AI / ML', bucket: 1, emoji: '🤖' },
   { id: 'webdev', label: 'Web dev', bucket: 1, emoji: '🌐' },
@@ -108,11 +117,62 @@ export const INTERESTS: readonly Interest[] = [
   { id: 'travel', label: 'Travel', bucket: 12, emoji: '✈️' },
 ] as const;
 
+/**
+ * Example EVENT catalog — a tech conference. Ids are namespaced `tc_*` (globally
+ * unique) and map into the shared buckets. Ships as a proof of the mechanism; a
+ * real event supplies its own set (tracks, "hiring/looking", etc.). Swapping the
+ * active catalog is the whole per-event customization surface.
+ */
+const TECH_CONF_INTERESTS: readonly Interest[] = [
+  // Tech (1)
+  { id: 'tc_frontend', label: 'Frontend', bucket: 1, emoji: '🎨' },
+  { id: 'tc_backend', label: 'Backend / infra', bucket: 1, emoji: '🗄️' },
+  { id: 'tc_ml', label: 'AI / ML', bucket: 1, emoji: '🤖' },
+  { id: 'tc_mobile', label: 'Mobile', bucket: 1, emoji: '📱' },
+  { id: 'tc_security', label: 'Security', bucket: 1, emoji: '🔒' },
+  { id: 'tc_devtools', label: 'Developer tools', bucket: 1, emoji: '🛠️' },
+  { id: 'tc_data', label: 'Data / analytics', bucket: 1, emoji: '📊' },
+  // Science (10)
+  { id: 'tc_research', label: 'Research', bucket: 10, emoji: '🔬' },
+  { id: 'tc_robotics', label: 'Robotics / hardware', bucket: 10, emoji: '🦾' },
+  // Business (11)
+  { id: 'tc_founder', label: 'Founder', bucket: 11, emoji: '🚀' },
+  { id: 'tc_investor', label: 'Investor', bucket: 11, emoji: '💹' },
+  { id: 'tc_pm', label: 'Product', bucket: 11, emoji: '🧩' },
+  { id: 'tc_design', label: 'Design', bucket: 11, emoji: '✏️' },
+  { id: 'tc_hiring', label: 'Hiring', bucket: 11, emoji: '🧑‍💼' },
+  { id: 'tc_jobseeking', label: 'Looking for a role', bucket: 11, emoji: '🔎' },
+  { id: 'tc_devrel', label: 'DevRel / community', bucket: 11, emoji: '📣' },
+] as const;
+
+/** A named interest set. Buckets are shared (module-level BUCKETS), not per-catalog. */
+export interface Catalog {
+  /** Stable catalog id (the value persisted as the device's active catalog). */
+  id: string;
+  label: string;
+  interests: readonly Interest[];
+}
+
+export const CATALOGS: readonly Catalog[] = [
+  { id: 'generic', label: 'General', interests: GENERIC_INTERESTS },
+  { id: 'tech-conf', label: 'Tech conference', interests: TECH_CONF_INTERESTS },
+] as const;
+
+/** The catalog a device uses until the user picks another. */
+export const DEFAULT_CATALOG_ID = 'generic';
+
+/** Back-compat alias: the generic catalog's interests (the default picker set). */
+export const INTERESTS = GENERIC_INTERESTS;
+
 /** Max interests a user may pick (keeps the profile doc + matching small). */
 export const MAX_INTERESTS = 8;
 
-const BY_ID = new Map(INTERESTS.map((i) => [i.id, i]));
+// Lookups resolve against the UNION of every catalog so a peer's stored ids always
+// resolve regardless of which catalog they were picked from.
+const ALL_INTERESTS: readonly Interest[] = CATALOGS.flatMap((c) => [...c.interests]);
+const BY_ID = new Map(ALL_INTERESTS.map((i) => [i.id, i]));
 const BUCKET_BY_ID = new Map(BUCKETS.map((b) => [b.id, b]));
+const CATALOG_BY_ID = new Map(CATALOGS.map((c) => [c.id, c]));
 
 export function interestById(id: string): Interest | undefined {
   return BY_ID.get(id);
@@ -122,9 +182,19 @@ export function bucketById(id: number): Bucket | undefined {
   return BUCKET_BY_ID.get(id);
 }
 
-/** True if every id is a known catalog tag. */
+/** True if the id is a known tag in ANY catalog. */
 export function isValidInterestId(id: string): boolean {
   return BY_ID.has(id);
+}
+
+/** Look up a catalog by id (undefined if unknown). */
+export function getCatalog(id: string): Catalog | undefined {
+  return CATALOG_BY_ID.get(id);
+}
+
+/** The interests to show in the picker for a catalog (generic if unknown). */
+export function catalogInterests(id: string): readonly Interest[] {
+  return (CATALOG_BY_ID.get(id) ?? CATALOG_BY_ID.get(DEFAULT_CATALOG_ID))?.interests ?? GENERIC_INTERESTS;
 }
 
 /** Drop unknown/duplicate ids, preserving order — use before storing/matching. */

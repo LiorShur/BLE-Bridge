@@ -16,7 +16,7 @@ import { launchCamera, launchImageLibrary, type Asset } from 'react-native-image
 import { useStore } from '../state/store';
 import { saveProfile, uploadProfilePhoto, ensureSignedIn } from '../lib/profiles';
 import { saveMyProfileLocal } from '../identity/persistentId';
-import { INTERESTS, MAX_INTERESTS } from '../discovery/interests';
+import { CATALOGS, catalogInterests, MAX_INTERESTS } from '../discovery/interests';
 
 export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactElement {
   const localPeerId = useStore((s) => s.localPeerId);
@@ -25,29 +25,41 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
   const myInterests = useStore((s) => s.myInterests);
   const myHeadline = useStore((s) => s.myHeadline);
   const storedLooking = useStore((s) => s.lookingToMeet);
+  const storedCatalogId = useStore((s) => s.activeCatalogId);
   const setMyProfile = useStore((s) => s.setMyProfile);
   const setMyDiscovery = useStore((s) => s.setMyDiscovery);
   const setLookingToMeet = useStore((s) => s.setLookingToMeet);
+  const setActiveCatalog = useStore((s) => s.setActiveCatalog);
 
   const [name, setName] = useState(myName ?? '');
   const [photoURL, setPhotoURL] = useState(myPhotoURL ?? '');
   // A locally-picked image (camera/gallery) not yet uploaded. Takes priority over
   // the pasted URL until saved.
   const [localUri, setLocalUri] = useState<string | null>(null);
-  // Discovery: selected interest ids (selection order preserved — the FIRST is the
-  // primary, whose bucket rides the wire), headline, and the looking-to-meet switch.
+  // Discovery: the active catalog (per-event), selected interest ids (selection
+  // order preserved — the FIRST is the primary, whose bucket rides the wire),
+  // headline, and the looking-to-meet switch.
+  const [catalogId, setCatalogId] = useState(storedCatalogId);
   const [interests, setInterests] = useState<string[]>(myInterests);
   const [headline, setHeadline] = useState(myHeadline ?? '');
   const [looking, setLooking] = useState(storedLooking);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const catalogTags = catalogInterests(catalogId);
   const toggleInterest = (id: string): void => {
     setInterests((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
       if (prev.length >= MAX_INTERESTS) return prev; // cap reached — ignore
       return [...prev, id];
     });
+  };
+  const pickCatalog = (id: string): void => {
+    if (id === catalogId) return;
+    setCatalogId(id);
+    // Drop selections that don't belong to the new catalog (ids are disjoint).
+    const valid = new Set(catalogInterests(id).map((i) => i.id));
+    setInterests((prev) => prev.filter((x) => valid.has(x)));
   };
   const primaryInterest = interests[0] ?? null;
 
@@ -102,6 +114,7 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
     const finalHeadline = headline.trim() || null;
     setMyProfile(finalName || null, finalPhoto);
     setMyDiscovery(interests, primaryInterest, finalHeadline);
+    setActiveCatalog(catalogId);
     setLookingToMeet(looking);
     await saveMyProfileLocal({
       name: finalName || null,
@@ -109,6 +122,7 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
       interests,
       primaryInterest,
       headline: finalHeadline,
+      activeCatalogId: catalogId,
     });
     let nameOk = true;
     // Persist interests/headline to the backend too (only meaningful with a name,
@@ -188,13 +202,30 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
           returnKeyType="done"
         />
 
+        {CATALOGS.length > 1 ? (
+          <>
+            <Text style={styles.label}>Interest set</Text>
+            <Text style={styles.hint}>Pick the set that matches where you are. You’ll match with people using the same one.</Text>
+            <View style={styles.chips}>
+              {CATALOGS.map((c) => {
+                const on = c.id === catalogId;
+                return (
+                  <Pressable key={c.id} onPress={() => pickCatalog(c.id)} style={[styles.chip, on ? styles.chipOn : null]} disabled={saving}>
+                    <Text style={[styles.chipText, on ? styles.chipTextOn : null]}>{c.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </>
+        ) : null}
+
         <Text style={styles.label}>Interests</Text>
         <Text style={styles.hint}>
           Pick up to {MAX_INTERESTS}. Your first pick (★) is your headline interest. These help us
           suggest people nearby you should meet.
         </Text>
         <View style={styles.chips}>
-          {INTERESTS.map((i) => {
+          {catalogTags.map((i) => {
             const idx = interests.indexOf(i.id);
             const selected = idx >= 0;
             const isPrimary = idx === 0;

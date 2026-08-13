@@ -19,6 +19,7 @@ const MY_PHOTO_KEY = 'aurabridge.profile.photoURL';
 const MY_INTERESTS_KEY = 'aurabridge.profile.interests';
 const MY_PRIMARY_KEY = 'aurabridge.profile.primaryInterest';
 const MY_HEADLINE_KEY = 'aurabridge.profile.headline';
+const MY_CATALOG_KEY = 'aurabridge.profile.catalog';
 
 /** Load the stored peerId, or generate + persist a new one. Never returns 0. */
 export async function loadOrCreatePeerId(): Promise<number> {
@@ -47,17 +48,20 @@ export interface StoredProfile {
   primaryInterest: string | null;
   /** Optional one-line discovery headline. */
   headline: string | null;
+  /** Active interest catalog id (per-event); null = use the default. */
+  activeCatalogId: string | null;
 }
 
 /** Load the local user's own saved profile (for prefilling the setup screen). */
 export async function loadMyProfile(): Promise<StoredProfile> {
   try {
-    const [name, photoURL, interestsRaw, primaryInterest, headline] = await Promise.all([
+    const [name, photoURL, interestsRaw, primaryInterest, headline, activeCatalogId] = await Promise.all([
       AsyncStorage.getItem(MY_NAME_KEY),
       AsyncStorage.getItem(MY_PHOTO_KEY),
       AsyncStorage.getItem(MY_INTERESTS_KEY),
       AsyncStorage.getItem(MY_PRIMARY_KEY),
       AsyncStorage.getItem(MY_HEADLINE_KEY),
+      AsyncStorage.getItem(MY_CATALOG_KEY),
     ]);
     let interests: string[] = [];
     if (interestsRaw) {
@@ -74,9 +78,10 @@ export async function loadMyProfile(): Promise<StoredProfile> {
       interests,
       primaryInterest: primaryInterest || null,
       headline: headline || null,
+      activeCatalogId: activeCatalogId || null,
     };
   } catch {
-    return { name: null, photoURL: null, interests: [], primaryInterest: null, headline: null };
+    return { name: null, photoURL: null, interests: [], primaryInterest: null, headline: null, activeCatalogId: null };
   }
 }
 
@@ -89,6 +94,7 @@ export async function saveMyProfileLocal(profile: StoredProfile): Promise<void> 
       [MY_INTERESTS_KEY, JSON.stringify(profile.interests ?? [])],
       [MY_PRIMARY_KEY, profile.primaryInterest ?? ''],
       [MY_HEADLINE_KEY, profile.headline ?? ''],
+      [MY_CATALOG_KEY, profile.activeCatalogId ?? ''],
     ]);
   } catch {
     /* best-effort */

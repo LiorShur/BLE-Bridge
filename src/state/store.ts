@@ -16,6 +16,7 @@ import { DEFAULT_ALPHA, DEFAULT_PATH_LOSS_N, D_NEAR, D_FAR } from '../signal/rss
 import { DEFAULT_TOLERANCE } from '../signal/alignment';
 import { DEFAULT_BOND_CONFIG } from '../signal/bond';
 import { DEFAULT_TX_POWER } from '../calibration';
+import { DEFAULT_CATALOG_ID } from '../discovery/interests';
 
 /** On-device tunable constants (HUD sliders, TASKS.md P2-8). */
 export interface Tunables {
@@ -172,6 +173,8 @@ export interface AppState {
   myPrimaryInterest: string | null;
   /** The local user's own one-line discovery headline (null = none). */
   myHeadline: string | null;
+  /** Active interest catalog id (per-event customization; generic by default). */
+  activeCatalogId: string;
   /**
    * Discovery mode: broadcast LOOKING_TO_MEET and surface nearby matches. OFF by
    * default (opt-in each session, DISCOVERY_SPEC §6). Reciprocity: you only see
@@ -195,6 +198,8 @@ export interface AppState {
   setMyProfile: (name: string | null, photoURL: string | null) => void;
   /** Set the local user's own discovery profile (interests + primary + headline). */
   setMyDiscovery: (interests: string[], primaryInterest: string | null, headline: string | null) => void;
+  /** Choose the active interest catalog (per-event customization). */
+  setActiveCatalog: (id: string) => void;
   /** Turn discovery mode on/off (broadcasts LOOKING_TO_MEET, surfaces matches). */
   setLookingToMeet: (enabled: boolean) => void;
   /** Replace the ranked nearby list (written each discovery pass). */
@@ -272,6 +277,7 @@ export const useStore = create<AppState>((set) => {
     myInterests: [],
     myPrimaryInterest: null,
     myHeadline: null,
+    activeCatalogId: DEFAULT_CATALOG_ID,
     lookingToMeet: false,
     nearby: [],
     nearbyOpen: false,
@@ -320,6 +326,7 @@ export const useStore = create<AppState>((set) => {
     setMyProfile: (name, photoURL) => set({ myName: name, myPhotoURL: photoURL }),
     setMyDiscovery: (interests, primaryInterest, headline) =>
       set({ myInterests: interests, myPrimaryInterest: primaryInterest, myHeadline: headline }),
+    setActiveCatalog: (id) => set({ activeCatalogId: id }),
     setLookingToMeet: (enabled) => set({ lookingToMeet: enabled }),
     setNearby: (people) => set({ nearby: people }),
     setNearbyOpen: (open) => set({ nearbyOpen: open }),

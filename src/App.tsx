@@ -99,6 +99,7 @@ export default function App(): React.ReactElement {
     const mine = await loadMyProfile();
     store.setMyProfile(mine.name, mine.photoURL);
     store.setMyDiscovery(mine.interests, mine.primaryInterest, mine.headline);
+    if (mine.activeCatalogId) store.setActiveCatalog(mine.activeCatalogId);
 
     const perms = await requestAllPermissions();
     if (!perms.granted) {

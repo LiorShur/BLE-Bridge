@@ -2,18 +2,24 @@ import { describe, it, expect } from 'vitest';
 import {
   INTERESTS,
   BUCKETS,
+  CATALOGS,
+  DEFAULT_CATALOG_ID,
   MAX_INTERESTS,
   interestById,
   bucketById,
   isValidInterestId,
   normaliseInterests,
   bucketForPrimary,
+  getCatalog,
+  catalogInterests,
 } from './interests';
 
+const ALL = CATALOGS.flatMap((c) => c.interests);
+
 describe('interest catalog integrity', () => {
-  it('has unique, non-empty tag ids', () => {
-    const ids = INTERESTS.map((i) => i.id);
-    expect(new Set(ids).size).toBe(ids.length);
+  it('has unique, non-empty tag ids GLOBALLY across all catalogs', () => {
+    const ids = ALL.map((i) => i.id);
+    expect(new Set(ids).size).toBe(ids.length); // no collision between catalogs
     expect(ids.every((id) => id.length > 0)).toBe(true);
   });
 
@@ -23,10 +29,36 @@ describe('interest catalog integrity', () => {
     expect(ids.every((id) => id >= 1 && id <= 255)).toBe(true);
   });
 
-  it('every interest rolls up to a real bucket', () => {
-    for (const i of INTERESTS) {
+  it('every interest in every catalog rolls up to a real shared bucket', () => {
+    for (const i of ALL) {
       expect(bucketById(i.bucket), `${i.id} → bucket ${i.bucket}`).toBeDefined();
     }
+  });
+
+  it('has a generic default catalog', () => {
+    expect(getCatalog(DEFAULT_CATALOG_ID)).toBeDefined();
+    expect(CATALOGS.some((c) => c.id === DEFAULT_CATALOG_ID)).toBe(true);
+  });
+});
+
+describe('catalogs', () => {
+  it('getCatalog resolves known ids and misses unknown ones', () => {
+    expect(getCatalog('generic')?.label).toBeTruthy();
+    expect(getCatalog('nope')).toBeUndefined();
+  });
+
+  it('catalogInterests returns the catalog set, falling back to the default', () => {
+    expect(catalogInterests('generic')).toBe(INTERESTS);
+    expect(catalogInterests('unknown')).toBe(catalogInterests(DEFAULT_CATALOG_ID));
+    expect(catalogInterests('tech-conf').length).toBeGreaterThan(0);
+  });
+
+  it('resolves an interest id from a NON-default catalog via the union', () => {
+    const evt = CATALOGS.find((c) => c.id !== DEFAULT_CATALOG_ID);
+    const tag = evt?.interests[0];
+    expect(tag).toBeDefined();
+    expect(interestById(tag!.id)?.label).toBe(tag!.label);
+    expect(isValidInterestId(tag!.id)).toBe(true);
   });
 });
 
