@@ -250,7 +250,13 @@ export function useBondEngine(
     const messaging = new GattMessaging(gatt, () => useStore.getState().localPeerId);
     messaging.onMessage((peerId, type, content) => {
       if (type === MSG_TYPE.TEXT) {
-        useStore.getState().pushChatMessage(peerId, 'them', utf8Decode(content));
+        const store = useStore.getState();
+        store.pushChatMessage(peerId, 'them', utf8Decode(content));
+        // If this peer's chat isn't open, cue the user: a sound + an unread badge.
+        if (store.chatPeerId !== peerId) {
+          Sound.receive();
+          store.bumpUnread(peerId);
+        }
       }
     });
     useStore.getState().registerChatSender((peerId, text) => messaging.send(peerId, MSG_TYPE.TEXT, utf8Encode(text)));

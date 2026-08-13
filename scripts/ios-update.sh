@@ -29,6 +29,19 @@ cp ios/AuraBridge/BlePeripheral.swift \
    ios/AuraBridge/AuraBridge-Bridging-Header.h \
    "${SHELL_DIR}/ios/AuraBridge/native/"
 
+# Xcode may reference a copy of a native file OUTSIDE native/ (e.g. an old copy at
+# ios/ root added during first setup). Those are what actually compile, so refresh
+# them too — otherwise a changed Swift file (like BlePeripheral) silently stays
+# stale and its native module breaks. Overwrite every duplicate with the repo copy.
+echo "==> Syncing any duplicate native copies Xcode may reference"
+for f in BlePeripheral.swift BlePeripheral.m Heading.swift Heading.m Sound.swift Sound.m AuraBridge-Bridging-Header.h; do
+  while IFS= read -r dup; do
+    [ "$dup" = "${SHELL_DIR}/ios/AuraBridge/native/$f" ] && continue
+    cp "ios/AuraBridge/$f" "$dup"
+    echo "    synced duplicate: $dup"
+  done < <(find "${SHELL_DIR}/ios" -name "$f" -not -path '*/Pods/*')
+done
+
 if [ -n "${FIREBASE_API_KEY:-}" ]; then
   echo "==> Refreshing Firebase config from FIREBASE_* env vars"
   node scripts/gen-firebase-config.js "${SHELL_DIR}/src/lib/firebaseConfig.ts"

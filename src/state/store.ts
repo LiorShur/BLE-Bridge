@@ -203,6 +203,8 @@ export interface AppState {
   chats: Record<number, ChatMessage[]>;
   /** Peer whose chat is open, or null. */
   chatPeerId: number | null;
+  /** Unread inbound message count per peer (cleared when their chat opens). */
+  unread: Record<number, number>;
   hudVisible: boolean;
 
   setCapability: (report: SupportReport) => void;
@@ -224,8 +226,10 @@ export interface AppState {
   setNearby: (people: NearbyPerson[]) => void;
   /** Open/close the "People nearby" sheet. */
   setNearbyOpen: (open: boolean) => void;
-  /** Open a peer's chat (or close with null). */
+  /** Open a peer's chat (or close with null); opening clears their unread count. */
   setChatPeer: (peerId: number | null) => void;
+  /** Increment a peer's unread count (an inbound message while their chat is closed). */
+  bumpUnread: (peerId: number) => void;
   /** Append a chat line for a peer. */
   pushChatMessage: (peerId: number, from: 'me' | 'them', text: string) => void;
   /** Send a chat message to a peer over the GATT channel (optimistically shown). */
@@ -315,6 +319,7 @@ export const useStore = create<AppState>((set, get) => {
     nearbyOpen: false,
     chats: {},
     chatPeerId: null,
+    unread: {},
     hudVisible: false,
 
     setCapability: (report) => set({ capability: report }),
@@ -364,7 +369,13 @@ export const useStore = create<AppState>((set, get) => {
     setVisibility: (mode) => set({ visibility: mode }),
     setNearby: (people) => set({ nearby: people }),
     setNearbyOpen: (open) => set({ nearbyOpen: open }),
-    setChatPeer: (peerId) => set({ chatPeerId: peerId }),
+    setChatPeer: (peerId) =>
+      set((s) => ({
+        chatPeerId: peerId,
+        unread: peerId == null ? s.unread : { ...s.unread, [peerId >>> 0]: 0 },
+      })),
+    bumpUnread: (peerId) =>
+      set((s) => ({ unread: { ...s.unread, [peerId >>> 0]: (s.unread[peerId >>> 0] ?? 0) + 1 } })),
     pushChatMessage: (peerId, from, text) =>
       set((s) => {
         const key = (chatKeySeq += 1);

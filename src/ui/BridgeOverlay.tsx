@@ -88,12 +88,15 @@ function Beam({
   reactions,
   profile,
   match,
+  unread,
 }: {
   bond: BondState;
   reactions: IncomingReaction[];
   profile: ProfileEntry | undefined;
   /** Discovery match for this peer (only present in discovery mode). */
   match: NearbyPerson | undefined;
+  /** Unread chat messages from this peer. */
+  unread: number;
 }): React.ReactElement {
   const hue = bond.peer ? hueByteToHex(bond.peer.hue) : '#7cf9ff';
   const strongMatch = match?.strong ?? false;
@@ -210,6 +213,12 @@ function Beam({
               <Text style={[styles.chipMatchText, strongMatch ? styles.chipMatchTextStrong : null]}>✨{match.score}</Text>
             </View>
           ) : null}
+          {/* Unread-chat badge (GATT messaging). */}
+          {unread > 0 ? (
+            <View style={styles.chipUnread}>
+              <Text style={styles.chipUnreadText}>💬{unread}</Text>
+            </View>
+          ) : null}
         </Pressable>
       ) : null}
       <Animated.View
@@ -259,6 +268,7 @@ export function BridgeOverlay(): React.ReactElement {
   const incoming = useStore((s) => s.incomingReactions);
   const profiles = useStore((s) => s.profiles);
   const nearby = useStore((s) => s.nearby);
+  const unread = useStore((s) => s.unread);
   const list = bonds.slice(0, MAX_BEAMS);
   const primary = list[0];
 
@@ -327,6 +337,7 @@ export function BridgeOverlay(): React.ReactElement {
             reactions={reactionsByPeer(b.peer?.peerId)}
             profile={b.peer ? profiles[b.peer.peerId >>> 0] : undefined}
             match={b.peer ? nearbyByPeer.get(b.peer.peerId) : undefined}
+            unread={b.peer ? (unread[b.peer.peerId >>> 0] ?? 0) : 0}
           />
         ))}
       </View>
@@ -422,6 +433,14 @@ const styles = StyleSheet.create({
   },
   chipMatchText: { color: MATCH_GOLD, fontSize: 10, fontWeight: '800' },
   chipMatchTextStrong: { color: '#3a2a06' },
+  chipUnread: {
+    marginLeft: 5,
+    backgroundColor: '#ff5f8f',
+    borderRadius: 8,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  chipUnreadText: { color: '#fff', fontSize: 10, fontWeight: '800' },
   cardBackdrop: { flex: 1, backgroundColor: 'rgba(4,6,16,0.8)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   card: {
     backgroundColor: 'rgba(18,26,52,0.98)',

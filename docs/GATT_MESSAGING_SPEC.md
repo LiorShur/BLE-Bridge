@@ -11,12 +11,18 @@ to exchange more than 24 bytes. Realistic ceiling: text/JSON instantly, small
 images (single-digit KB) in 1–4 s; NOT full photos/video (use a fat pipe or a
 backend relay for those — out of scope here).
 
-Status: **M0–M3 code-complete; on-device validation pending.** The pure layers
-(frame codec, reassembler, outbound queue, envelope, UTF-8) are unit-tested; the
-native characteristic, wrappers, central primitives, the `GattMessaging`
-orchestration service, and a chat UI are all in. What remains is **tuning on two
-devices** — transport-choice edge cases, MTU behaviour, retransmit timing — which
-can only be observed on real radios (like the interop itself took several rounds).
+Status: **M0–M3 VALIDATED on hardware** (2026-08-13). Text chat confirmed working
+**both directions Android↔iPhone** on real devices. The pure layers (frame codec,
+reassembler, outbound queue, envelope, UTF-8) are unit-tested; the native
+characteristic, wrappers, central primitives, the `GattMessaging` orchestration,
+and the chat UI are live. Inbound messages notify (sound + a 💬 unread badge on the
+peer's chip) when the chat is closed.
+
+> **iOS build gotcha (fixed):** the first device test failed because Xcode was
+> compiling a stale duplicate `BlePeripheral.swift` (an old `NSObject` copy at the
+> shell's `ios/` root) instead of the `RCTEventEmitter` copy in `native/` — so the
+> message characteristic never got built. `scripts/ios-update.sh` now syncs every
+> duplicate copy Xcode might reference, not just `native/`.
 
 ---
 
