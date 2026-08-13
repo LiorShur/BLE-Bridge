@@ -15,11 +15,14 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Base64
 import androidx.core.content.ContextCompat
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.UiThreadUtil
+import com.facebook.react.bridge.WritableMap
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import java.util.Collections
 import java.util.UUID
 
@@ -45,17 +48,26 @@ class BleGattServerModule(private val reactContext: ReactApplicationContext) :
     // Keep in sync with src/ble/gatt/constants.ts.
     private val SERVICE_UUID = UUID.fromString("a0e1b5d2-7c3f-4e8a-9b10-2f6c1d4e7a90")
     private val PAYLOAD_CHAR_UUID = UUID.fromString("a0e1b5d2-7c3f-4e8a-9b10-2f6c1d4e7a91")
+    // Message characteristic (write + notify) — docs/GATT_MESSAGING_SPEC.md.
+    private val MESSAGE_CHAR_UUID = UUID.fromString("a0e1b5d2-7c3f-4e8a-9b10-2f6c1d4e7a92")
     // Standard Client Characteristic Configuration Descriptor — how a central
     // subscribes to notifications.
     private val CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     private const val MAX_PAYLOAD_BYTES = 24
+    // Inbound message frames + MTU changes are pushed to JS via these events.
+    private const val EVENT_MESSAGE = "BleGattServer:message"
+    private const val EVENT_MTU = "BleGattServer:mtu"
   }
 
   private var gattServer: BluetoothGattServer? = null
   private var payloadChar: BluetoothGattCharacteristic? = null
+  private var messageChar: BluetoothGattCharacteristic? = null
   private var currentPayload: ByteArray = ByteArray(0)
   // Centrals that have enabled notifications on the payload characteristic.
   private val subscribers: MutableSet<BluetoothDevice> =
+      Collections.synchronizedSet(mutableSetOf())
+  // Centrals that have enabled notifications on the MESSAGE characteristic.
+  private val msgSubscribers: MutableSet<BluetoothDevice> =
       Collections.synchronizedSet(mutableSetOf())
 
   override fun getName(): String = NAME
@@ -65,6 +77,39 @@ class BleGattServerModule(private val reactContext: ReactApplicationContext) :
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
           if (newState == BluetoothProfile.STATE_DISCONNECTED) {
             subscribers.remove(device)
+            msgSubscribers.remove(device)
+          }
+        }
+
+        override fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
+          // JS chunks outbound message frames to this MTU (minus ATT overhead).
+          val params = Arguments.createMap()
+          params.putString("device", device.address)
+          params.putInt("mtu", mtu)
+          emit(EVENT_MTU, params)
+        }
+
+        override fun onCharacteristicWriteRequest(
+            device: BluetoothDevice,
+            requestId: Int,
+            characteristic: BluetoothGattCharacteristic,
+            preparedWrite: Boolean,
+            responseNeeded: Boolean,
+            offset: Int,
+            value: ByteArray?,
+        ) {
+          if (characteristic.uuid == MESSAGE_CHAR_UUID) {
+            if (value != null && value.isNotEmpty()) {
+              val params = Arguments.createMap()
+              params.putString("device", device.address)
+              params.putString("data", Base64.encodeToString(value, Base64.NO_WRAP))
+              emit(EVENT_MESSAGE, params)
+            }
+            if (responseNeeded) {
+              safeSendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)
+            }
+          } else if (responseNeeded) {
+            safeSendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, offset, null)
           }
         }
 
@@ -96,7 +141,12 @@ class BleGattServerModule(private val reactContext: ReactApplicationContext) :
             val enable =
                 value != null &&
                     value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-            if (enable) subscribers.add(device) else subscribers.remove(device)
+            // Route the subscription to the set for the descriptor's OWN
+            // characteristic — payload and message notify independently.
+            val target =
+                if (descriptor.characteristic?.uuid == MESSAGE_CHAR_UUID) msgSubscribers
+                else subscribers
+            if (enable) target.add(device) else target.remove(device)
           }
           if (responseNeeded) {
             safeSendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)
@@ -146,12 +196,32 @@ class BleGattServerModule(private val reactContext: ReactApplicationContext) :
                 BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE,
             )
         characteristic.addDescriptor(cccd)
+
+        // Message characteristic: central writes frames here; we notify frames
+        // back (docs/GATT_MESSAGING_SPEC.md). Its own CCCD → its own subscribers.
+        val msgCharacteristic =
+            BluetoothGattCharacteristic(
+                MESSAGE_CHAR_UUID,
+                BluetoothGattCharacteristic.PROPERTY_WRITE or
+                    BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE or
+                    BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+                BluetoothGattCharacteristic.PERMISSION_WRITE,
+            )
+        msgCharacteristic.addDescriptor(
+            BluetoothGattDescriptor(
+                CCCD_UUID,
+                BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE,
+            ),
+        )
+
         val service = BluetoothGattService(SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
         service.addCharacteristic(characteristic)
+        service.addCharacteristic(msgCharacteristic)
         server.addService(service)
 
         gattServer = server
         payloadChar = characteristic
+        messageChar = msgCharacteristic
         promise.resolve(null)
       } catch (e: SecurityException) {
         promise.reject("PERMISSION_DENIED", "BLUETOOTH_CONNECT not granted.")
@@ -201,10 +271,54 @@ class BleGattServerModule(private val reactContext: ReactApplicationContext) :
       }
       gattServer = null
       payloadChar = null
+      messageChar = null
       subscribers.clear()
+      msgSubscribers.clear()
       promise.resolve(null)
     }
   }
+
+  /**
+   * Notify a message frame to every central subscribed to the message
+   * characteristic. Frames are pre-chunked to the MTU in JS (messaging.ts); this
+   * just pushes the bytes. Best-effort — a missed notify is handled by the ack /
+   * retransmit layer (outbound.ts).
+   */
+  @ReactMethod
+  fun notifyMessage(dataBase64: String, promise: Promise) {
+    UiThreadUtil.runOnUiThread {
+      val bytes =
+          try {
+            Base64.decode(dataBase64, Base64.NO_WRAP)
+          } catch (e: IllegalArgumentException) {
+            promise.reject("INVALID_BASE64", "Frame failed to decode.")
+            return@runOnUiThread
+          }
+      val server = gattServer
+      val characteristic = messageChar
+      if (server == null || characteristic == null) {
+        promise.resolve(null) // server not running
+        return@runOnUiThread
+      }
+      characteristic.value = bytes
+      val targets = synchronized(msgSubscribers) { msgSubscribers.toList() }
+      try {
+        for (device in targets) {
+          server.notifyCharacteristicChanged(device, characteristic, false)
+        }
+        promise.resolve(null)
+      } catch (e: SecurityException) {
+        promise.reject("PERMISSION_DENIED", "BLUETOOTH_CONNECT not granted.")
+      } catch (e: Exception) {
+        promise.reject("INTERNAL_ERROR", e.message ?: "notify failed.")
+      }
+    }
+  }
+
+  // NativeEventEmitter requires these to exist (no-op — we emit unconditionally).
+  @ReactMethod fun addListener(eventName: String) {}
+
+  @ReactMethod fun removeListeners(count: Int) {}
 
   @ReactMethod
   fun getStatus(promise: Promise) {
@@ -215,6 +329,16 @@ class BleGattServerModule(private val reactContext: ReactApplicationContext) :
   }
 
   // ---- Internals ----------------------------------------------------------
+
+  private fun emit(event: String, params: WritableMap) {
+    try {
+      reactContext
+          .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+          .emit(event, params)
+    } catch (e: Exception) {
+      /* bridge torn down — nothing to do */
+    }
+  }
 
   private fun safeSendResponse(
       device: BluetoothDevice,

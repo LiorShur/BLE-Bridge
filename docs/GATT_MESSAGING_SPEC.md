@@ -11,8 +11,13 @@ to exchange more than 24 bytes. Realistic ceiling: text/JSON instantly, small
 images (single-digit KB) in 1–4 s; NOT full photos/video (use a fat pipe or a
 backend relay for those — out of scope here).
 
-Status: **M0 spec + M1 pure protocol built & tested.** M2 (native characteristic
-wiring) and M3 (UI) are specced below, not yet built.
+Status: **M0 spec + M1 pure protocol + M2 transport wiring built.** M1 (frame
+codec, reassembler) and the outbound reliability queue are unit-tested off-device;
+M2's native characteristic (Kotlin + Swift), the TS wrappers, and the central
+primitives (MTU + message subscribe/write) are in. The remaining M2 piece — the
+`GattMessaging` orchestration service that routes per-peer sends/receives and runs
+the retransmit loop — plus M3 (UI) are best iterated on two devices (like the
+interop itself), and are scoped below.
 
 ---
 
@@ -147,8 +152,23 @@ Types are a small enum so unknown types are ignored forward-compatibly.
 - **M0 — spec.** ✅ this document.
 - **M1 — pure protocol.** ✅ `src/ble/gatt/messaging.ts` — frame codec, chunker,
   Reassembler, acks; fully unit-tested off-device. No transport, no UI.
-- **M2 — native characteristic + client wiring.** Kotlin + Swift + `gattClient`;
-  MTU negotiation; the `GattMessaging` service with retransmit. Needs two devices.
+- **M2 — native characteristic + client wiring.**
+  - ✅ Kotlin `BleGattServerModule`: MESSAGE char (write+notify), inbound-write →
+    `BleGattServer:message` event, `onMtuChanged` → `BleGattServer:mtu`, per-char
+    CCCD routing, `notifyMessage`.
+  - ✅ Swift `BlePeripheral` (now an `RCTEventEmitter`): MESSAGE char, `didReceiveWrite`
+    → `BlePeripheral:message`, notify-size on subscribe → `BlePeripheral:mtu`,
+    `notifyMessage`.
+  - ✅ TS wrappers (`gattServer.ts`, `iosPeripheral.ts`): `notifyMessage` + the
+    message/mtu event subscriptions.
+  - ✅ `gattClient.ts` central: `requestMTU(517)`, subscribe to the message
+    characteristic (`setMessageSink`), `writeMessageFrame`, `peerMtu`.
+  - ✅ `outbound.ts`: pure ack/retransmit `OutboundQueue`, unit-tested.
+  - ⏳ **`GattMessaging` service** — the remaining orchestration: one
+    `Reassembler` + `OutboundQueue` per peer, msgId allocation, choose transport
+    (central `writeMessageFrame` vs peripheral `notifyMessage`) per peer, a
+    retransmit tick, and deliver completed messages to the app. Needs two devices
+    to validate the transport choices and MTU behaviour.
 - **M3 — chat + profile-over-GATT UI.** Text chat; serverless profile exchange
   into the existing `profiles` cache.
 

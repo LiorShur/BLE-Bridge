@@ -4,14 +4,21 @@
 // the interop path (docs/GATT_SPEC.md, P-i2b). See src/ble/gatt/iosPeripheral.ts.
 //
 #import <React/RCTBridgeModule.h>
+#import <React/RCTEventEmitter.h>
 
-@interface RCT_EXTERN_MODULE(BlePeripheral, NSObject)
+// Subclasses RCTEventEmitter so inbound message frames + notify-size are pushed to
+// JS as 'BlePeripheral:message' / 'BlePeripheral:mtu' events.
+@interface RCT_EXTERN_MODULE(BlePeripheral, RCTEventEmitter)
 
 RCT_EXTERN_METHOD(startPeripheral:(NSString *)base64
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
 RCT_EXTERN_METHOD(updatePayload:(NSString *)base64
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(notifyMessage:(NSString *)base64
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 

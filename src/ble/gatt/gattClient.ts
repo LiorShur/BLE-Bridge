@@ -18,7 +18,7 @@ import { BleManager, type Device, type Subscription } from 'react-native-ble-plx
 import { base64ToBytes } from '../base64';
 import { decodePayload, headingToDegrees } from '../payload';
 import type { ScanObservation } from '../scanner';
-import { BRIDGE_SERVICE_UUID, PAYLOAD_CHAR_UUID } from './constants';
+import { BRIDGE_SERVICE_UUID, PAYLOAD_CHAR_UUID, MESSAGE_CHAR_UUID } from './constants';
 
 const RSSI_POLL_MS = 350;
 const CONNECT_TIMEOUT_MS = 8000;
@@ -35,7 +35,15 @@ interface Conn {
   rssiTimer: ReturnType<typeof setInterval> | null;
   lastRssi: number | null;
   lastBytes: Uint8Array | null;
+  /** Message-characteristic notification subscription (GATT_MESSAGING_SPEC). */
+  msgMonitor: Subscription | null;
+  /** Negotiated ATT MTU; JS chunks outbound frames to `mtu − 3`. */
+  mtu: number;
 }
+
+/** Default ATT MTU before negotiation (23 → 20 usable payload bytes). */
+const DEFAULT_MTU = 23;
+const TARGET_MTU = 517;
 
 export class GattClient {
   private manager: BleManager;
@@ -50,8 +58,59 @@ export class GattClient {
   private deviceConnecting = new Set<string>();
   private deviceAttempts = new Map<string, { lastAt: number; count: number }>();
 
+  // Inbound message frames from any connected peer's message characteristic.
+  private onFrame?: (deviceId: string, frameBase64: string) => void;
+
   constructor(manager: BleManager) {
     this.manager = manager;
+  }
+
+  /** Register the sink for inbound message frames (GATT_MESSAGING_SPEC). */
+  setMessageSink(cb: (deviceId: string, frameBase64: string) => void): void {
+    this.onFrame = cb;
+  }
+
+  /**
+   * After a connection is up, request a large MTU and subscribe to the message
+   * characteristic's notifications. Both are best-effort — a peer without the
+   * message characteristic (older build) simply never delivers frames.
+   */
+  private attachMessaging(device: Device, conn: Conn): void {
+    device
+      .requestMTU(TARGET_MTU)
+      .then((d: Device) => {
+        if (typeof d.mtu === 'number' && d.mtu > 0) conn.mtu = d.mtu;
+      })
+      .catch(() => {
+        /* MTU negotiation unsupported/failed — keep the default */
+      });
+    try {
+      conn.msgMonitor = device.monitorCharacteristicForService(
+        BRIDGE_SERVICE_UUID,
+        MESSAGE_CHAR_UUID,
+        (err, char) => {
+          if (err) return; // disconnect handler cleans up
+          if (char?.value) this.onFrame?.(conn.deviceId, char.value);
+        },
+      );
+    } catch {
+      /* characteristic absent — no messaging with this peer */
+    }
+  }
+
+  /** Write one message frame (pre-chunked to the MTU) to a connected peer. */
+  writeMessageFrame(deviceId: string, frameBase64: string): Promise<void> {
+    return this.manager
+      .writeCharacteristicWithoutResponseForDevice(deviceId, BRIDGE_SERVICE_UUID, MESSAGE_CHAR_UUID, frameBase64)
+      .then(() => undefined)
+      .catch(() => undefined); // best-effort; ack/retransmit covers a failed write
+  }
+
+  /** Negotiated MTU for a connected peer (by deviceId), or the default. */
+  peerMtu(deviceId: string): number {
+    for (const c of this.conns.values()) if (c.deviceId === deviceId) return c.mtu;
+    const dc = this.deviceConns.get(deviceId);
+    return dc?.mtu ?? DEFAULT_MTU;
   }
 
   /** Number of live GATT connections (for the debug HUD). */
@@ -102,6 +161,8 @@ export class GattClient {
           rssiTimer: null,
           lastRssi: null,
           lastBytes: null,
+          msgMonitor: null,
+          mtu: DEFAULT_MTU,
         };
         conn.disconnectSub = d.onDisconnected(() => this.drop(peerId));
         conn.monitor = d.monitorCharacteristicForService(
@@ -125,6 +186,7 @@ export class GattClient {
               /* transient; disconnect handler covers a real drop */
             });
         }, RSSI_POLL_MS);
+        this.attachMessaging(d, conn);
         this.conns.set(peerId, conn);
         this.connecting.delete(peerId);
         this.attempts.delete(peerId); // success clears the backoff
@@ -168,6 +230,8 @@ export class GattClient {
           rssiTimer: null,
           lastRssi: null,
           lastBytes: null,
+          msgMonitor: null,
+          mtu: DEFAULT_MTU,
         };
         conn.disconnectSub = d.onDisconnected(() => this.dropDevice(deviceId));
         conn.monitor = d.monitorCharacteristicForService(
@@ -191,6 +255,7 @@ export class GattClient {
               /* transient */
             });
         }, RSSI_POLL_MS);
+        this.attachMessaging(d, conn);
         this.deviceConns.set(deviceId, conn);
         this.deviceConnecting.delete(deviceId);
         this.deviceAttempts.delete(deviceId);
@@ -235,6 +300,7 @@ export class GattClient {
   private teardown(conn: Conn): void {
     if (conn.rssiTimer) clearInterval(conn.rssiTimer);
     conn.monitor?.remove();
+    conn.msgMonitor?.remove();
     conn.disconnectSub?.remove();
     this.manager.cancelDeviceConnection(conn.deviceId).catch(() => {
       /* already gone */

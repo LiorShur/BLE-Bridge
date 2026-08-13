@@ -10,13 +10,17 @@
  *
  * NOTE: depends on React Native; not part of the pure-logic test suite.
  */
-import { NativeModules } from 'react-native';
+import { NativeModules, NativeEventEmitter, type EmitterSubscription } from 'react-native';
 
 interface NativeGattServer {
   startServer(payloadBase64: string): Promise<void>;
   updatePayload(payloadBase64: string): Promise<void>;
   stopServer(): Promise<void>;
   getStatus(): Promise<{ running: boolean; subscribers: number }>;
+  /** Notify a message frame to subscribed centrals (GATT_MESSAGING_SPEC). */
+  notifyMessage(frameBase64: string): Promise<void>;
+  addListener(event: string): void;
+  removeListeners(count: number): void;
 }
 
 function mod(): NativeGattServer | undefined {
@@ -57,4 +61,31 @@ export async function gattServerStatus(): Promise<{ running: boolean; subscriber
   } catch {
     return { running: false, subscribers: 0 };
   }
+}
+
+/** Notify one message frame (pre-chunked to the MTU) to subscribed centrals. */
+export async function notifyGattMessage(frameBase64: string): Promise<void> {
+  try {
+    await mod()?.notifyMessage(frameBase64);
+  } catch {
+    /* best-effort — the ack/retransmit layer covers a dropped notify */
+  }
+}
+
+/** A central wrote a message frame to us (peripheral side). `device` is its address. */
+export function onGattServerMessage(cb: (device: string, frameBase64: string) => void): EmitterSubscription | null {
+  const m = mod();
+  if (!m) return null;
+  const emitter = new NativeEventEmitter(NativeModules.BleGattServer);
+  return emitter.addListener('BleGattServer:message', (e: { device: string; data: string }) =>
+    cb(e.device, e.data),
+  );
+}
+
+/** A central negotiated an MTU — JS chunks outbound frames to it (minus 3). */
+export function onGattServerMtu(cb: (device: string, mtu: number) => void): EmitterSubscription | null {
+  const m = mod();
+  if (!m) return null;
+  const emitter = new NativeEventEmitter(NativeModules.BleGattServer);
+  return emitter.addListener('BleGattServer:mtu', (e: { device: string; mtu: number }) => cb(e.device, e.mtu));
 }
