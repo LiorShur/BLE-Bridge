@@ -29,14 +29,23 @@ cp ios/AuraBridge/BlePeripheral.swift \
    ios/AuraBridge/AuraBridge-Bridging-Header.h \
    "${SHELL_DIR}/ios/AuraBridge/native/"
 
-# Xcode may reference a copy of a native file OUTSIDE native/ (e.g. an old copy at
-# ios/ root added during first setup). Those are what actually compile, so refresh
-# them too — otherwise a changed Swift file (like BlePeripheral) silently stays
-# stale and its native module breaks. Overwrite every duplicate with the repo copy.
+# The Xcode target references these native files at the ios/ ROOT (an old copy
+# added during first setup — see IOS_SETUP.md). ALWAYS ensure the root copies exist
+# and are current: syncing only pre-existing duplicates (below) can't recreate a
+# root copy that went missing (e.g. after a git shuffle), which fails the build with
+# "Build input files cannot be found". Copy them unconditionally first.
+echo "==> Ensuring root native copies exist (Xcode target references ios/ root)"
+for f in BlePeripheral.swift BlePeripheral.m Heading.swift Heading.m Sound.swift Sound.m AuraBridge-Bridging-Header.h; do
+  cp "ios/AuraBridge/$f" "${SHELL_DIR}/ios/$f"
+done
+
+# Also refresh any OTHER duplicate Xcode might reference (a copy somewhere other
+# than native/ or the root), so a changed Swift file never silently stays stale.
 echo "==> Syncing any duplicate native copies Xcode may reference"
 for f in BlePeripheral.swift BlePeripheral.m Heading.swift Heading.m Sound.swift Sound.m AuraBridge-Bridging-Header.h; do
   while IFS= read -r dup; do
     [ "$dup" = "${SHELL_DIR}/ios/AuraBridge/native/$f" ] && continue
+    [ "$dup" = "${SHELL_DIR}/ios/$f" ] && continue
     cp "ios/AuraBridge/$f" "$dup"
     echo "    synced duplicate: $dup"
   done < <(find "${SHELL_DIR}/ios" -name "$f" -not -path '*/Pods/*')
