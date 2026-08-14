@@ -13,6 +13,7 @@
 import { useEffect } from 'react';
 import { useStore } from '../state/store';
 import { fetchProfile, profilesEnabled } from '../lib/profiles';
+import { savePeerProfileToCache } from './profileCache';
 
 export function useProfiles(): void {
   const bonds = useStore((s) => s.bonds);
@@ -38,6 +39,9 @@ export function useProfiles(): void {
       if (!existing) doFetch = true;
       else if (existing.status === 'loading') doFetch = false;
       else if (existing.status === 'missing') doFetch = !recentlyTried;
+      // A cache-restored entry is a placeholder — refresh it from the backend when
+      // we can, so a stale name/photo gets corrected.
+      else if (existing.source === 'cache') doFetch = !recentlyTried;
       else doFetch = existing.source === 'gatt' && !existing.photoURL && !recentlyTried;
       if (!doFetch) continue;
 
@@ -51,6 +55,7 @@ export function useProfiles(): void {
         if (cur?.source === 'gatt') {
           if (p?.photoURL && !cur.photoURL) {
             useStore.getState().setProfileEntry(peerId, { ...cur, photoURL: p.photoURL });
+            void savePeerProfileToCache(peerId, { photoURL: p.photoURL }, Date.now());
           }
           return;
         }
@@ -69,6 +74,19 @@ export function useProfiles(): void {
               }
             : { status: 'missing', triedAt: Date.now() },
         );
+        // Persist a successful resolution for offline redundancy on the next launch.
+        if (p) {
+          void savePeerProfileToCache(
+            peerId,
+            {
+              name: p.name,
+              photoURL: p.photoURL,
+              ...(p.interests ? { interests: p.interests } : {}),
+              ...(p.headline ? { headline: p.headline } : {}),
+            },
+            Date.now(),
+          );
+        }
       });
     }
   }, [bonds]);

@@ -99,8 +99,10 @@ export interface ProfileEntry {
   interests?: string[];
   /** Optional one-line headline. */
   headline?: string;
-  /** Where this entry came from — a peer-supplied GATT profile is authoritative. */
-  source?: 'gatt' | 'firebase';
+  /** Where this entry came from. 'cache' = restored from local storage (weakest,
+   *  always refreshed); 'gatt' = peer-supplied over BLE (authoritative for text);
+   *  'firebase' = fetched from the backend. */
+  source?: 'gatt' | 'firebase' | 'cache';
   /** When this lookup was last attempted (ms), so 'missing' can be retried. */
   triedAt?: number;
 }

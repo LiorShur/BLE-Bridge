@@ -26,7 +26,7 @@ import {
 import { initializeAuth, getReactNativePersistence, signInAnonymously, type Auth } from 'firebase/auth';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { firebaseConfig, isFirebaseConfigured } from '../lib/firebaseConfig';
+import { resolvedFirebaseConfig as firebaseConfig, isFirebaseConfigured } from '../lib/firebaseConfigResolved';
 
 export interface Profile {
   name: string;

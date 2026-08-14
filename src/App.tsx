@@ -33,6 +33,7 @@ import { useDiscovery } from './discovery/useDiscovery';
 import { NearbySheet } from './features/nearby/NearbySheet';
 import { ChatSheet } from './features/chat/ChatSheet';
 import { loadOrCreatePeerId, loadMyProfile } from './identity/persistentId';
+import { loadPeerProfileCache } from './profiles/profileCache';
 
 type Phase = 'checking' | 'permsDenied' | 'capability' | 'onboarding' | 'profile' | 'ready';
 
@@ -105,6 +106,21 @@ export default function App(): React.ReactElement {
     store.setMyDiscovery(mine.interests, mine.primaryInterest, mine.headline);
     if (mine.activeCatalogId) store.setActiveCatalog(mine.activeCatalogId);
     if (mine.visibility) store.setVisibility(mine.visibility as Visibility);
+
+    // Redundancy: hydrate previously-seen PEER profiles from the local cache so a
+    // known peer shows their name/photo immediately — even offline or before any
+    // Firebase fetch. Marked 'cache' so useProfiles still refreshes them when it can.
+    const cached = await loadPeerProfileCache();
+    for (const [id, c] of Object.entries(cached)) {
+      store.setProfileEntry(Number(id), {
+        status: 'loaded',
+        source: 'cache',
+        ...(c.name ? { name: c.name } : {}),
+        ...(c.photoURL !== undefined ? { photoURL: c.photoURL } : {}),
+        ...(c.interests ? { interests: c.interests } : {}),
+        ...(c.headline ? { headline: c.headline } : {}),
+      });
+    }
 
     const perms = await requestAllPermissions();
     if (!perms.granted) {

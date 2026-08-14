@@ -75,6 +75,9 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
   const [visibility, setVis] = useState<Visibility>(storedVisibility);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // First-ever setup (no name/photo saved yet). On first run we ask for a photo so
+  // it gets captured and saved to the cloud; returning users are never blocked.
+  const [firstSetup] = useState(() => !myName && !myPhotoURL && !myPhotoThumb);
 
   const catalogTags = catalogInterests(catalogId);
   const toggleInterest = (id: string): void => {
@@ -95,6 +98,10 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
 
   const trimmedPhoto = photoURL.trim();
   const previewUri = localUri ?? (/^https?:\/\//i.test(trimmedPhoto) ? trimmedPhoto : null);
+  const hasPhoto = !!previewUri || !!photoB64;
+  // On the very first setup we require a photo before "Save & continue" (Skip is
+  // still available); after that it's optional.
+  const needsPhoto = firstSetup && !hasPhoto;
 
   const pick = (asset: Asset | undefined): void => {
     if (asset?.uri) {
@@ -128,7 +135,7 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
   };
 
   const onSave = async (): Promise<void> => {
-    if (saving) return;
+    if (saving || needsPhoto) return;
     setSaving(true);
     setError(null);
     const finalName = name.trim();
@@ -227,6 +234,9 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
             <Text style={styles.photoButtonText}>🖼 Gallery</Text>
           </Pressable>
         </View>
+        {needsPhoto ? (
+          <Text style={styles.hint}>A photo helps people recognise you when you bridge. Add one to continue — or skip below.</Text>
+        ) : null}
 
         <Text style={styles.labelSmall}>…or paste an image URL</Text>
         <TextInput
@@ -325,8 +335,16 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        <Pressable style={[styles.button, saving && styles.buttonDisabled]} onPress={() => void onSave()}>
-          {saving ? <ActivityIndicator color="#04203a" /> : <Text style={styles.buttonText}>Save & continue</Text>}
+        <Pressable
+          style={[styles.button, (saving || needsPhoto) && styles.buttonDisabled]}
+          onPress={() => void onSave()}
+          disabled={saving || needsPhoto}
+        >
+          {saving ? (
+            <ActivityIndicator color="#04203a" />
+          ) : (
+            <Text style={styles.buttonText}>{needsPhoto ? 'Add a photo to continue' : 'Save & continue'}</Text>
+          )}
         </Pressable>
         <Pressable style={styles.skip} onPress={onDone} disabled={saving}>
           <Text style={styles.skipText}>{error ? 'Continue anyway' : 'Skip for now'}</Text>

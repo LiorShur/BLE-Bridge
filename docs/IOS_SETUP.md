@@ -141,10 +141,24 @@ should see a device advertising service UUID
 
 - **iPhone advertising** requires the P-i2b Swift module (§6). Until it's added,
   the iPhone is central-only and Android can't discover it.
-- **Profiles on iOS**: the Firebase JS SDK's Firestore can't reach its backend
-  reliably under iOS RN ("could not reach backend"), so names/photos may not load
-  on the iPhone. Non-fatal (the bridge works without them); the robust fix is the
-  native `@react-native-firebase` SDK, tracked separately.
+- **Firebase on iOS — REQUIRED config step.** The Firebase Web config is injected
+  from GitHub Secrets **only during the Android CI build**
+  (`scripts/gen-firebase-config.js`). A local Xcode build never runs that step, so
+  it ships the empty `src/lib/firebaseConfig.ts` stub → `isFirebaseConfigured()` is
+  false and every profile write returns `firebase-unconfigured`. This is why the
+  iPhone shows "not configured / not signed in" even though anonymous auth is
+  enabled — it's missing config, not an auth failure. **Fix:** fill in
+  `src/lib/firebaseConfigLocal.ts` with the five public Web-config values on your
+  Mac, then run
+  `git update-index --skip-worktree src/lib/firebaseConfigLocal.ts` (keeps `git
+  pull` from wiping it and keeps the keys out of commits) and rebuild. The resolver
+  (`firebaseConfigResolved.ts`) merges it over the injected config, so once set the
+  iPhone reads/writes profiles and photos exactly like Android. A native
+  `@react-native-firebase` SDK remains the longer-term option but is not needed for
+  this.
+- **Offline redundancy**: peer profiles resolved from Firebase *or* over GATT are
+  cached on-device (`src/profiles/profileCache.ts`) and re-hydrated at launch, so a
+  known peer's name/photo still shows when Firebase is unreachable.
 - **txPower**: iOS doesn't expose the advertised TX reference; when the iPhone
   becomes a peripheral (P-i2b) it will advertise a per-model constant from
   `docs/CALIBRATION.md`.

@@ -23,6 +23,7 @@ import { MSG_TYPE } from '../ble/gatt/messaging';
 import { utf8Encode, utf8Decode } from '../ble/gatt/utf8';
 import { encodeProfile, decodeProfile } from '../ble/gatt/profileCodec';
 import { base64ToBytes, bytesToBase64 } from '../ble/base64';
+import { savePeerProfileToCache } from '../profiles/profileCache';
 import { useStore } from '../state/store';
 import { Sound } from '../audio/sound';
 import {
@@ -313,10 +314,20 @@ export function useBondEngine(
       } else if (type === MSG_TYPE.PROFILE) {
         // Serverless identity: a peer sent us their name/interests over GATT.
         const p = decodeProfile(content);
-        if (p) store.setPeerProfileFromGatt(peerId, p);
+        if (p) {
+          store.setPeerProfileFromGatt(peerId, p);
+          // Redundancy: remember it locally so it survives a Firebase-less relaunch.
+          void savePeerProfileToCache(
+            peerId,
+            { name: p.name, ...(p.interests ? { interests: p.interests } : {}), ...(p.headline ? { headline: p.headline } : {}) },
+            Date.now(),
+          );
+        }
       } else if (type === MSG_TYPE.PHOTO) {
         // Serverless avatar: raw JPEG bytes → a data: URI the UI can render.
-        store.setPeerPhotoFromGatt(peerId, `data:image/jpeg;base64,${bytesToBase64(content)}`);
+        const dataUri = `data:image/jpeg;base64,${bytesToBase64(content)}`;
+        store.setPeerPhotoFromGatt(peerId, dataUri);
+        void savePeerProfileToCache(peerId, { photoURL: dataUri }, Date.now());
       }
     });
     useStore.getState().registerChatSender((peerId, text) => messaging.send(peerId, MSG_TYPE.TEXT, utf8Encode(text)));
