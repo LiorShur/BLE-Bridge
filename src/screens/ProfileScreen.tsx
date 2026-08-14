@@ -15,34 +15,10 @@ import { View, Text, TextInput, Pressable, Image, ScrollView, StyleSheet, Activi
 import { launchCamera, launchImageLibrary, type Asset } from 'react-native-image-picker';
 import { useStore } from '../state/store';
 import { VISIBILITY_OPTIONS, type Visibility } from '../discovery/visibility';
-import { saveProfile, uploadProfilePhoto, ensureSignedIn, getLastAuthError } from '../lib/profiles';
 import { setPendingProfileSync } from '../profiles/pendingSync';
+import { flushPendingProfile } from '../profiles/profileSync';
 import { saveMyProfileLocal } from '../identity/persistentId';
 import { CATALOGS, catalogInterests, MAX_INTERESTS } from '../discovery/interests';
-
-/**
- * Turn the real Firestore/auth error codes into a targeted, honest hint. We only
- * name a specific cause when the code points there — no more blanket "enable
- * Anonymous sign-in" when it's already on. The backend is optional, so every hint
- * ends by reassuring that identity still reaches nearby peers over Bluetooth.
- */
-function authHintFor(code: string | null, authErr: string | null, signedIn: boolean): string {
-  const overGatt = 'Your name and photo still reach nearby people over Bluetooth — you can continue.';
-  const c = `${code ?? ''} ${authErr ?? ''}`;
-  if (/admin-restricted-operation|configuration-not-found/.test(c)) {
-    return `Anonymous sign-in looks disabled for this project (Authentication → Sign-in method). ${overGatt}`;
-  }
-  if (/too-many-requests/.test(c)) {
-    return `Firebase is rate-limiting new anonymous sessions on this device; try again in a bit. ${overGatt}`;
-  }
-  if (/network-request-failed|unavailable|deadline-exceeded/.test(c)) {
-    return `Looks like a network problem reaching Firebase. ${overGatt}`;
-  }
-  if (/permission-denied/.test(c)) {
-    return `Firestore rules rejected the write${signedIn ? '' : ' (not signed in)'}. ${overGatt}`;
-  }
-  return overGatt;
-}
 
 export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactElement {
   const localPeerId = useStore((s) => s.localPeerId);
@@ -58,7 +34,6 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
   const setMyDiscovery = useStore((s) => s.setMyDiscovery);
   const setVisibility = useStore((s) => s.setVisibility);
   const setActiveCatalog = useStore((s) => s.setActiveCatalog);
-  const setProfileSyncPending = useStore((s) => s.setProfileSyncPending);
 
   const [name, setName] = useState(myName ?? '');
   const [photoURL, setPhotoURL] = useState(myPhotoURL ?? '');
@@ -141,33 +116,22 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
     setSaving(true);
     setError(null);
     const finalName = name.trim();
-
-    // Whether anonymous auth actually signed us in. If not, cloud writes are denied
-    // (rules require auth). We don't assume WHY here — the real code is reported
-    // below (getLastAuthError) so the cause is diagnosable rather than guessed.
-    const signedIn = await ensureSignedIn();
-
-    // Resolve the photo, but NEVER let a photo failure block saving the name. A
-    // deferred (offline) result is not an error — it means "will upload later".
-    let finalPhoto: string | null = trimmedPhoto || null;
-    let photoError: string | null = null;
-    let photoDeferred = false;
-    if (localUri) {
-      const res = await uploadProfilePhoto(localPeerId, localUri);
-      if (res.url) finalPhoto = res.url;
-      else if (res.deferred) photoDeferred = true;
-      else photoError = res.error ?? 'upload-failed';
-    }
-
     const finalHeadline = headline.trim() || null;
-    setMyProfile(finalName || null, finalPhoto);
+    // Best photo reference to store locally right now: a pasted http(s) URL or the
+    // previously-saved cloud URL. A freshly-picked local image shows from its
+    // base64 thumb and uploads to the cloud in the background (below).
+    const localPhoto = trimmedPhoto || myPhotoURL || null;
+
+    // LOCAL-FIRST: persist everything on-device immediately. This never fails and
+    // never touches the network, so Save is instant regardless of connectivity.
+    setMyProfile(finalName || null, localPhoto);
     setMyPhotoThumb(photoB64);
     setMyDiscovery(interests, primaryInterest, finalHeadline);
     setActiveCatalog(catalogId);
     setVisibility(visibility);
     await saveMyProfileLocal({
       name: finalName || null,
-      photoURL: finalPhoto,
+      photoURL: localPhoto,
       photoThumb: photoB64,
       interests,
       primaryInterest,
@@ -175,57 +139,25 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
       activeCatalogId: catalogId,
       visibility,
     });
-    let nameErr: string | null = null;
-    let nameDeferred = false;
-    // Persist interests/headline to the backend too (only meaningful with a name,
-    // since the profile doc is keyed to a named identity peers can look up).
-    if (finalName) {
-      const res = await saveProfile(localPeerId, {
-        name: finalName,
-        photoURL: finalPhoto,
-        ...(interests.length ? { interests } : {}),
-        ...(finalHeadline ? { headline: finalHeadline } : {}),
-      });
-      if (!res.ok) {
-        if (res.deferred) nameDeferred = true;
-        else nameErr = res.error ?? 'write-failed';
-      }
-    }
-    setSaving(false);
 
-    // Offline: the local save already succeeded above. Stash what still needs to
-    // reach the cloud and let the background sync flush it when connectivity
-    // returns — never hang the UI waiting on a write that can't complete now.
-    if ((nameDeferred || photoDeferred) && finalName) {
+    // Queue the cloud sync and kick it off in the BACKGROUND — never awaited here,
+    // so an offline (or slow) network can't hang the UI. Online it lands in ~1-2 s;
+    // offline it stays queued and useProfileSync retries, showing the "will sync"
+    // banner. Only meaningful with a name (the profile doc is keyed to a named id).
+    if (finalName) {
       await setPendingProfileSync({
         peerId: localPeerId,
         name: finalName,
         interests,
         headline: finalHeadline,
-        photoURL: finalPhoto && /^https?:\/\//i.test(finalPhoto) ? finalPhoto : null,
-        photoLocalUri: photoDeferred ? localUri : null,
+        photoURL: localPhoto && /^https?:\/\//i.test(localPhoto) ? localPhoto : null,
+        photoLocalUri: localUri ?? null,
         ts: Date.now(),
       });
-      setProfileSyncPending(true);
+      void flushPendingProfile();
     }
 
-    if (photoError || nameErr) {
-      // Report the REAL codes — the Firestore write error and the anonymous-auth
-      // error — instead of guessing. `authHint` only names the provider when the
-      // code actually points there; over-photos still show over GATT regardless.
-      const authErr = getLastAuthError();
-      const parts: string[] = [];
-      parts.push(nameErr ? `Name save failed (${nameErr}).` : 'Name saved.');
-      if (photoError) parts.push(`Photo upload failed (${photoError}).`);
-      if (!signedIn) parts.push(`Firebase sign-in failed${authErr ? ` (${authErr})` : ''}.`);
-      parts.push(authHintFor(nameErr ?? photoError, authErr, signedIn));
-      setError(parts.filter(Boolean).join(' ').trim());
-      return;
-    }
-    if (finalPhoto) {
-      setPhotoURL(finalPhoto);
-      setLocalUri(null);
-    }
+    setSaving(false);
     onDone();
   };
 
@@ -374,6 +306,9 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
         <Pressable style={styles.skip} onPress={onDone} disabled={saving}>
           <Text style={styles.skipText}>{error ? 'Continue anyway' : 'Skip for now'}</Text>
         </Pressable>
+        {/* Build marker — lets us confirm the phone is running the latest JS
+            (the iOS build compiles from a copy in ios-shell/, easy to miss). */}
+        <Text style={styles.buildTag}>build: offline-sync-2</Text>
       </View>
     </ScrollView>
   );
@@ -454,4 +389,5 @@ const styles = StyleSheet.create({
   buttonText: { color: '#04203a', fontSize: 16, fontWeight: '700' },
   skip: { marginTop: 12, alignItems: 'center', paddingVertical: 8 },
   skipText: { color: '#9fb3c8', fontSize: 14 },
+  buildTag: { color: '#3a4761', fontSize: 10, textAlign: 'center', marginTop: 10 },
 });

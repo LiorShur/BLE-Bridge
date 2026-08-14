@@ -21,6 +21,7 @@ import {
   getDoc,
   setDoc,
   serverTimestamp,
+  setLogLevel,
   type Firestore,
 } from 'firebase/firestore';
 import { initializeAuth, getReactNativePersistence, signInAnonymously, type Auth } from 'firebase/auth';
@@ -112,6 +113,11 @@ function ensureInit(): boolean {
     // polling is the documented fix for RN and is REQUIRED here (this was why
     // names weren't appearing). auto-detect is unreliable in RN; force it.
     db = initializeFirestore(app, { experimentalForceLongPolling: true });
+    // Silence the SDK's own retry logging at the source. Offline it spams
+    // "could not reach backend" / "transport errored" console warnings that are
+    // non-fatal (we handle failures via return values + local fallback). This is
+    // more reliable than LogBox pattern-matching.
+    setLogLevel('silent');
   } catch {
     app = null;
     db = null;
