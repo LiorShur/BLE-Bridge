@@ -62,6 +62,19 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// A Firestore/Storage write's promise only settles on SERVER ack — offline it never
+// resolves, which would hang the UI forever. Every cloud call is raced against this
+// timeout so callers get a bounded answer and can fall back to local + deferred sync.
+const CLOUD_TIMEOUT_MS = 8000;
+const TIMED_OUT = Symbol('cloud-timeout');
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
+  return Promise.race([p, delay(ms).then(() => TIMED_OUT)]);
+}
+/** Error codes that mean "offline / transient" — safe to retry later, not a real failure. */
+function isOfflineCode(code: string): boolean {
+  return /unavailable|deadline-exceeded|network|timeout|retry-limit/i.test(code);
+}
+
 /**
  * Resolve once anonymous auth has settled, returning whether we actually have a
  * signed-in user. If this is false, every Firestore/Storage WRITE will be denied
@@ -81,8 +94,8 @@ export async function ensureSignedIn(): Promise<boolean> {
   // or persistence not restoring one). Try once more, explicitly, so we either get
   // signed in or capture the REAL error code for the UI instead of guessing.
   try {
-    await signInAnonymously(auth);
-    lastAuthError = null;
+    const r = await withTimeout(signInAnonymously(auth), CLOUD_TIMEOUT_MS);
+    lastAuthError = r === TIMED_OUT ? 'auth/timeout-offline' : null;
   } catch (e) {
     lastAuthError = (e as { code?: string })?.code ?? (e as Error)?.message ?? 'auth/unknown';
   }
@@ -158,6 +171,8 @@ export interface UploadResult {
   url?: string;
   /** Firebase error code (e.g. 'storage/unauthorized') or a reason string. */
   error?: string;
+  /** True when the failure was offline/transient — retry later, don't treat as fatal. */
+  deferred?: boolean;
 }
 
 /**
@@ -188,19 +203,24 @@ function uriToBlob(uri: string): Promise<Blob> {
  */
 export async function uploadProfilePhoto(peerId: number, localUri: string): Promise<UploadResult> {
   if (!ensureInit() || !app) return { error: 'firebase-unconfigured' };
-  try {
+  const storageApp = app;
+  const work = (async (): Promise<string> => {
     if (authReady) await authReady;
-    const storage = getStorage(app);
+    const storage = getStorage(storageApp);
     const r = storageRef(storage, `profilePhotos/${peerId >>> 0}.jpg`);
     const blob = await uriToBlob(localUri);
     await uploadBytes(r, blob, { contentType: 'image/jpeg' });
     // RN blobs hold a native resource; release it.
     (blob as unknown as { close?: () => void }).close?.();
-    const url = await getDownloadURL(r);
-    return { url };
+    return getDownloadURL(r);
+  })();
+  try {
+    const res = await withTimeout(work, CLOUD_TIMEOUT_MS);
+    if (res === TIMED_OUT) return { error: 'offline', deferred: true };
+    return { url: res };
   } catch (e) {
     const code = (e as { code?: string })?.code ?? (e as Error)?.message ?? 'upload-failed';
-    return { error: code };
+    return { error: code, deferred: isOfflineCode(code) };
   }
 }
 
@@ -208,6 +228,8 @@ export interface SaveResult {
   ok: boolean;
   /** Firestore error code (e.g. 'permission-denied', 'unavailable') when ok is false. */
   error?: string;
+  /** True when the failure was offline/transient — retry later, don't treat as fatal. */
+  deferred?: boolean;
 }
 
 /**
@@ -229,10 +251,13 @@ export async function saveProfile(peerId: number, profile: Profile): Promise<Sav
       headline: profile.headline ?? '',
       updatedAt: serverTimestamp(),
     };
-    await setDoc(doc(db, PROFILES, String(peerId >>> 0)), docData, { merge: true });
+    const res = await withTimeout(setDoc(doc(db, PROFILES, String(peerId >>> 0)), docData, { merge: true }), CLOUD_TIMEOUT_MS);
+    // A timeout means we're offline: the write is queued in the SDK for this session,
+    // but treat it as deferred so the caller persists a pending sync for durability.
+    if (res === TIMED_OUT) return { ok: false, error: 'offline', deferred: true };
     return { ok: true };
   } catch (e) {
     const code = (e as { code?: string })?.code ?? (e as Error)?.message ?? 'write-failed';
-    return { ok: false, error: code };
+    return { ok: false, error: code, deferred: isOfflineCode(code) };
   }
 }

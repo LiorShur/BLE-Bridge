@@ -16,6 +16,7 @@ import { launchCamera, launchImageLibrary, type Asset } from 'react-native-image
 import { useStore } from '../state/store';
 import { VISIBILITY_OPTIONS, type Visibility } from '../discovery/visibility';
 import { saveProfile, uploadProfilePhoto, ensureSignedIn, getLastAuthError } from '../lib/profiles';
+import { setPendingProfileSync } from '../profiles/pendingSync';
 import { saveMyProfileLocal } from '../identity/persistentId';
 import { CATALOGS, catalogInterests, MAX_INTERESTS } from '../discovery/interests';
 
@@ -57,6 +58,7 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
   const setMyDiscovery = useStore((s) => s.setMyDiscovery);
   const setVisibility = useStore((s) => s.setVisibility);
   const setActiveCatalog = useStore((s) => s.setActiveCatalog);
+  const setProfileSyncPending = useStore((s) => s.setProfileSyncPending);
 
   const [name, setName] = useState(myName ?? '');
   const [photoURL, setPhotoURL] = useState(myPhotoURL ?? '');
@@ -145,12 +147,15 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
     // below (getLastAuthError) so the cause is diagnosable rather than guessed.
     const signedIn = await ensureSignedIn();
 
-    // Resolve the photo, but NEVER let a photo failure block saving the name.
+    // Resolve the photo, but NEVER let a photo failure block saving the name. A
+    // deferred (offline) result is not an error — it means "will upload later".
     let finalPhoto: string | null = trimmedPhoto || null;
     let photoError: string | null = null;
+    let photoDeferred = false;
     if (localUri) {
       const res = await uploadProfilePhoto(localPeerId, localUri);
       if (res.url) finalPhoto = res.url;
+      else if (res.deferred) photoDeferred = true;
       else photoError = res.error ?? 'upload-failed';
     }
 
@@ -171,6 +176,7 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
       visibility,
     });
     let nameErr: string | null = null;
+    let nameDeferred = false;
     // Persist interests/headline to the backend too (only meaningful with a name,
     // since the profile doc is keyed to a named identity peers can look up).
     if (finalName) {
@@ -180,9 +186,28 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
         ...(interests.length ? { interests } : {}),
         ...(finalHeadline ? { headline: finalHeadline } : {}),
       });
-      if (!res.ok) nameErr = res.error ?? 'write-failed';
+      if (!res.ok) {
+        if (res.deferred) nameDeferred = true;
+        else nameErr = res.error ?? 'write-failed';
+      }
     }
     setSaving(false);
+
+    // Offline: the local save already succeeded above. Stash what still needs to
+    // reach the cloud and let the background sync flush it when connectivity
+    // returns — never hang the UI waiting on a write that can't complete now.
+    if ((nameDeferred || photoDeferred) && finalName) {
+      await setPendingProfileSync({
+        peerId: localPeerId,
+        name: finalName,
+        interests,
+        headline: finalHeadline,
+        photoURL: finalPhoto && /^https?:\/\//i.test(finalPhoto) ? finalPhoto : null,
+        photoLocalUri: photoDeferred ? localUri : null,
+        ts: Date.now(),
+      });
+      setProfileSyncPending(true);
+    }
 
     if (photoError || nameErr) {
       // Report the REAL codes — the Firestore write error and the anonymous-auth

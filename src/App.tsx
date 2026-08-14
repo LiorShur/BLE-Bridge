@@ -13,7 +13,13 @@
  * NOTE: depends on React Native + Viro; not testable off-device.
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, LogBox } from 'react-native';
+
+// Offline, the Firestore SDK logs noisy "could not reach backend" / transport
+// errors while it retries in the background. They're non-fatal (the app falls back
+// to the local cache + Bluetooth), so keep them out of the dev red-box. No-op in
+// release builds.
+LogBox.ignoreLogs([/@firebase\/firestore/, 'Could not reach Cloud Firestore backend', /WebChannelConnection/]);
 import { CameraBridge } from './ar/CameraBridge';
 import { ReactionBar } from './ui/Reactions';
 import { DebugHUD } from './debug/DebugHUD';
@@ -29,6 +35,7 @@ import { useAdvertiser } from './ble/useAdvertiser';
 import { useIosPeripheral } from './ble/useIosPeripheral';
 import { useBondEngine } from './signal/useBondEngine';
 import { useProfiles } from './profiles/useProfiles';
+import { useProfileSync } from './profiles/useProfileSync';
 import { useDiscovery } from './discovery/useDiscovery';
 import { NearbySheet } from './features/nearby/NearbySheet';
 import { ChatSheet } from './features/chat/ChatSheet';
@@ -44,6 +51,7 @@ function MainExperience(): React.ReactElement {
   const visibility = useStore((s) => s.visibility);
   const strongCount = useStore((s) => s.nearby.filter((n) => n.strong).length);
   const browsing = isBrowsing(visibility);
+  const syncPending = useStore((s) => s.profileSyncPending);
 
   // Mount the full signal stack. On iOS (P-i2a) there's no native advertiser yet,
   // so advertising is not mounted — the iPhone participates as a GATT central and
@@ -55,6 +63,8 @@ function MainExperience(): React.ReactElement {
   useIosPeripheral(Platform.OS === 'ios');
   useBondEngine(true, gattEnabled);
   useProfiles();
+  // Flush any offline profile edit to the cloud once connectivity returns.
+  useProfileSync();
   // Discovery (D3): rank nearby looking peers by shared interests.
   useDiscovery();
 
@@ -78,6 +88,11 @@ function MainExperience(): React.ReactElement {
       {/* Hidden HUD toggle (P4-6): long-press the top-right corner. Rendered
           BEFORE the HUD so the HUD's modal overlay sits above it when open. */}
       <Pressable style={styles.hudTap} onLongPress={toggleHud} delayLongPress={600} />
+      {syncPending ? (
+        <View style={styles.syncBanner} pointerEvents="none">
+          <Text style={styles.syncBannerText}>Offline — your profile will sync when you’re back online</Text>
+        </View>
+      ) : null}
       <DebugHUD />
       <NearbySheet />
       <ChatSheet />
@@ -203,4 +218,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   nearbyBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  syncBanner: {
+    position: 'absolute',
+    bottom: 24,
+    alignSelf: 'center',
+    maxWidth: '90%',
+    backgroundColor: 'rgba(6,10,26,0.82)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(124,249,255,0.25)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  syncBannerText: { color: '#cfe0f5', fontSize: 12, fontWeight: '600', textAlign: 'center' },
 });

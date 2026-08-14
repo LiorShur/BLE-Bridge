@@ -206,6 +206,9 @@ export interface AppState {
   nearby: NearbyPerson[];
   /** Whether the "People nearby" sheet is open. */
   nearbyOpen: boolean;
+  /** True while the local user's profile change hasn't reached the cloud yet
+   *  (offline). Cleared when the background sync flushes it. */
+  profileSyncPending: boolean;
   /** Chat history per peer (GATT messaging channel). */
   chats: Record<number, ChatMessage[]>;
   /** Peer whose chat is open, or null. */
@@ -239,6 +242,7 @@ export interface AppState {
   setNearby: (people: NearbyPerson[]) => void;
   /** Open/close the "People nearby" sheet. */
   setNearbyOpen: (open: boolean) => void;
+  setProfileSyncPending: (pending: boolean) => void;
   /** Open a peer's chat (or close with null); opening clears their unread count. */
   setChatPeer: (peerId: number | null) => void;
   /** Increment a peer's unread count (an inbound message while their chat is closed). */
@@ -331,6 +335,7 @@ export const useStore = create<AppState>((set, get) => {
     visibility: 'off',
     nearby: [],
     nearbyOpen: false,
+    profileSyncPending: false,
     chats: {},
     chatPeerId: null,
     unread: {},
@@ -414,6 +419,7 @@ export const useStore = create<AppState>((set, get) => {
     setVisibility: (mode) => set({ visibility: mode }),
     setNearby: (people) => set({ nearby: people }),
     setNearbyOpen: (open) => set({ nearbyOpen: open }),
+    setProfileSyncPending: (pending) => set({ profileSyncPending: pending }),
     setChatPeer: (peerId) =>
       set((s) => ({
         chatPeerId: peerId,
