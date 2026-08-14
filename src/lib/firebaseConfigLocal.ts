@@ -18,7 +18,11 @@
  *      never accidentally commit the keys:
  *        git update-index --skip-worktree src/lib/firebaseConfigLocal.ts
  *      (to undo later: git update-index --no-skip-worktree src/lib/firebaseConfigLocal.ts)
- *   3. Rebuild the iOS app.
+ *   3. Copy your edit into the iOS build shell — the Xcode build compiles from
+ *      ios-shell/src, NOT this file directly, so editing here has no effect until:
+ *        bash scripts/ios-update.sh
+ *      Verify: `cat ios-shell/src/lib/firebaseConfigLocal.ts` shows your real values.
+ *   4. In Xcode: Clean Build Folder (Shift+Cmd+K), then Run.
  *
  * Any non-empty field here overrides the CI-injected value (see
  * firebaseConfigResolved.ts). Leave it empty and nothing changes — the injected

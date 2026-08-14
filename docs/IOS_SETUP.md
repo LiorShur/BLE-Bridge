@@ -151,7 +151,12 @@ should see a device advertising service UUID
   `src/lib/firebaseConfigLocal.ts` with the five public Web-config values on your
   Mac, then run
   `git update-index --skip-worktree src/lib/firebaseConfigLocal.ts` (keeps `git
-  pull` from wiping it and keeps the keys out of commits) and rebuild. The resolver
+  pull` from wiping it and keeps the keys out of commits). **Then copy the edit into
+  the build shell** — the Xcode build compiles from `ios-shell/src`, a *copy* of
+  `src/`, so editing `src/lib/firebaseConfigLocal.ts` has NO effect until you run
+  `bash scripts/ios-update.sh` (verify with
+  `cat ios-shell/src/lib/firebaseConfigLocal.ts` — it must show your real values,
+  not the commented template). Then Clean Build Folder and rebuild. The resolver
   (`firebaseConfigResolved.ts`) merges it over the injected config, so once set the
   iPhone reads/writes profiles and photos exactly like Android. A native
   `@react-native-firebase` SDK remains the longer-term option but is not needed for
