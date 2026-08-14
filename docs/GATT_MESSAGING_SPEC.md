@@ -194,9 +194,11 @@ Types are a small enum so unknown types are ignored forward-compatibly.
   **Flow control (multi-frame reliability).** A photo is dozens of frames, and the
   first cut dropped them silently. The transport is now back-pressured end to end
   (`gattMessaging.ts` serialized `drainLoop`):
-  - **Central → peripheral** frames use **write-WITH-response**
-    (`gattClient.writeMessageFrame`), which is ATT-flow-controlled, so the sender
-    can't outrun the link.
+  - **Central → peripheral** frames use **write-WITHOUT-response**
+    (`gattClient.writeMessageFrame`). Write-WITH-response was tried for
+    flow-control but regressed Android→iPhone delivery on real hardware; since
+    photos now travel over Firebase, the flow-control benefit wasn't worth a broken
+    chat direction. Text is 1–2 frames and unaffected.
   - **Peripheral → central** notifies read the native `updateValue` result — iOS
     returns `false` when its TX queue is full (`notifyIosMessage` now propagates
     it). A frame reported not-sent is **held and retried** (up to `MAX_FRAME_TRIES`)

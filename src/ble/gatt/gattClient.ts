@@ -111,17 +111,20 @@ export class GattClient {
 
   /**
    * Write one message frame (pre-chunked to the MTU) to a connected peer, and
-   * resolve whether it was written. We use write-WITH-response deliberately: it is
-   * ATT-flow-controlled, so a multi-frame message (a photo) can't overrun the
-   * transmit buffer and silently drop frames the way write-without-response does.
-   * A single-frame text is unaffected. Returns false on failure so the paced drain
-   * can hold and retry rather than race ahead.
+   * resolve whether the OS accepted it.
+   *
+   * We use write-WITHOUT-response: it is the configuration proven to deliver
+   * central→peripheral (Android→iPhone) reliably. Write-WITH-response regressed
+   * that direction on real hardware, and its only benefit here was flow-control for
+   * multi-frame photos — which now travel over Firebase, so it isn't needed. Text
+   * frames are 1–2 frames and unaffected; the app-level ack/retransmit still covers
+   * an occasional dropped write.
    */
   writeMessageFrame(deviceId: string, frameBase64: string): Promise<boolean> {
     return this.manager
-      .writeCharacteristicWithResponseForDevice(deviceId, BRIDGE_SERVICE_UUID, MESSAGE_CHAR_UUID, frameBase64)
+      .writeCharacteristicWithoutResponseForDevice(deviceId, BRIDGE_SERVICE_UUID, MESSAGE_CHAR_UUID, frameBase64)
       .then(() => true)
-      .catch(() => false); // ack/retransmit + the drain's backpressure cover a failed write
+      .catch(() => false);
   }
 
   /** Negotiated MTU for a connected peer (by deviceId), or the default. */
