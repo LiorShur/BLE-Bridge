@@ -66,7 +66,9 @@ function delay(ms: number): Promise<void> {
 // A Firestore/Storage write's promise only settles on SERVER ack — offline it never
 // resolves, which would hang the UI forever. Every cloud call is raced against this
 // timeout so callers get a bounded answer and can fall back to local + deferred sync.
-const CLOUD_TIMEOUT_MS = 8000;
+// Kept fairly short so "offline" is detected quickly (drives the sync banner); the
+// background retry loop covers a slow-but-online network that occasionally trips it.
+const CLOUD_TIMEOUT_MS = 5000;
 const TIMED_OUT = Symbol('cloud-timeout');
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
   return Promise.race([p, delay(ms).then(() => TIMED_OUT)]);
@@ -190,6 +192,31 @@ export interface UploadResult {
  * 'ArrayBuffer' … are not supported"). An XHR with responseType 'blob' returns a
  * native-backed Blob the SDK uploads directly, no ArrayBuffer conversion.
  */
+function blobToDataUri(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error('blob-to-datauri-failed'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Fetch a REMOTE image URL (a Firebase Storage download URL) into a self-contained
+ * `data:` URI. Peer photos are cached for offline display, but a cached https URL
+ * can't render with no network — the bytes must be inlined. Returns null on any
+ * failure (offline, timeout) so the caller keeps the remote URL as a fallback.
+ * Thumbnails are ~128px/q0.5 (a few KB), so the base64 blow-up is cheap to store.
+ */
+export async function imageUrlToDataUri(url: string): Promise<string | null> {
+  try {
+    const res = await withTimeout(uriToBlob(url).then(blobToDataUri), CLOUD_TIMEOUT_MS);
+    return res === TIMED_OUT || typeof res !== 'string' ? null : res;
+  } catch {
+    return null;
+  }
+}
+
 function uriToBlob(uri: string): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();

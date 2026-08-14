@@ -12,7 +12,7 @@
  */
 import { useEffect } from 'react';
 import { useStore } from '../state/store';
-import { fetchProfile, profilesEnabled } from '../lib/profiles';
+import { fetchProfile, profilesEnabled, imageUrlToDataUri } from '../lib/profiles';
 import { savePeerProfileToCache } from './profileCache';
 
 export function useProfiles(): void {
@@ -48,14 +48,21 @@ export function useProfiles(): void {
       // Stamp the attempt WITHOUT destroying a GATT entry's name/interests.
       setProfileEntry(peerId, existing ? { ...existing, triedAt: now } : { status: 'loading', triedAt: now });
 
-      void fetchProfile(peerId).then((p) => {
+      void fetchProfile(peerId).then(async (p) => {
+        // Inline a remote Firebase photo URL into bytes (data: URI) so it renders
+        // OFFLINE from cache — a cached https URL can't load with no network. On
+        // failure (offline), keep the remote URL so it still shows while online.
+        let photo = p?.photoURL ?? null;
+        if (photo && /^https?:\/\//i.test(photo)) {
+          photo = (await imageUrlToDataUri(photo)) ?? photo;
+        }
         const cur = useStore.getState().profiles[peerId];
         // A GATT profile is authoritative for name/interests — only ever borrow a
         // photo from Firebase to fill a gap; never overwrite the peer-supplied text.
         if (cur?.source === 'gatt') {
-          if (p?.photoURL && !cur.photoURL) {
-            useStore.getState().setProfileEntry(peerId, { ...cur, photoURL: p.photoURL });
-            void savePeerProfileToCache(peerId, { photoURL: p.photoURL }, Date.now());
+          if (photo && !cur.photoURL) {
+            useStore.getState().setProfileEntry(peerId, { ...cur, photoURL: photo });
+            void savePeerProfileToCache(peerId, { photoURL: photo }, Date.now());
           }
           return;
         }
@@ -65,7 +72,7 @@ export function useProfiles(): void {
             ? {
                 status: 'loaded',
                 name: p.name,
-                photoURL: p.photoURL,
+                photoURL: photo,
                 source: 'firebase',
                 // Discovery fields (DISCOVERY_SPEC): cached so useDiscovery can
                 // match without a second fetch. Absent when the peer set none.
@@ -80,7 +87,7 @@ export function useProfiles(): void {
             peerId,
             {
               name: p.name,
-              photoURL: p.photoURL,
+              photoURL: photo,
               ...(p.interests ? { interests: p.interests } : {}),
               ...(p.headline ? { headline: p.headline } : {}),
             },
