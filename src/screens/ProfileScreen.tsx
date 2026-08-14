@@ -15,7 +15,7 @@ import { View, Text, TextInput, Pressable, Image, ScrollView, StyleSheet, Activi
 import { launchCamera, launchImageLibrary, type Asset } from 'react-native-image-picker';
 import { useStore } from '../state/store';
 import { VISIBILITY_OPTIONS, type Visibility } from '../discovery/visibility';
-import { saveProfile, uploadProfilePhoto, ensureSignedIn } from '../lib/profiles';
+import { saveProfile, uploadProfilePhoto, ensureSignedIn, getLastAuthError } from '../lib/profiles';
 import { saveMyProfileLocal } from '../identity/persistentId';
 import { CATALOGS, catalogInterests, MAX_INTERESTS } from '../discovery/interests';
 
@@ -80,9 +80,10 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
     }
   };
 
-  // 256px / q0.5 keeps the base64 thumbnail small enough to send over GATT in ~1 s
-  // while staying crisp for the avatar/card; includeBase64 returns those bytes.
-  const PICK_OPTS = { mediaType: 'photo' as const, quality: 0.5, maxWidth: 256, maxHeight: 256, includeBase64: true };
+  // 128px / q0.5 keeps the base64 thumbnail tiny (~4–8 KB) so the multi-frame
+  // GATT photo transfer completes reliably; it's still crisp for the avatar/card
+  // (rendered at 72px). includeBase64 returns those bytes.
+  const PICK_OPTS = { mediaType: 'photo' as const, quality: 0.5, maxWidth: 128, maxHeight: 128, includeBase64: true };
 
   const takeSelfie = async (): Promise<void> => {
     try {
@@ -152,8 +153,12 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
     setSaving(false);
 
     if (photoError || !nameOk) {
+      // Surface the REAL sign-in error code when we couldn't authenticate, so a
+      // failure is diagnosable (disabled provider vs. throttling vs. network)
+      // rather than a generic guess.
+      const authErr = getLastAuthError();
       const hint = !signedIn
-        ? ' Not signed in to Firebase — enable Anonymous sign-in (Authentication → Sign-in method).'
+        ? ` Not signed in to Firebase${authErr ? ` (${authErr})` : ''} — enable Anonymous sign-in (Authentication → Sign-in method).`
         : '';
       const parts: string[] = [];
       if (!nameOk) parts.push('Name save failed.');

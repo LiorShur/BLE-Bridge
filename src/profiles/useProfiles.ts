@@ -29,15 +29,31 @@ export function useProfiles(): void {
       if (!b.peer) continue;
       const peerId = b.peer.peerId >>> 0;
       const existing = profiles[peerId];
-      // Skip if loaded, currently loading, or missing-but-recently-tried.
-      if (existing && !(existing.status === 'missing' && now - (existing.triedAt ?? 0) > RETRY_MISSING_MS)) {
-        continue;
-      }
-      setProfileEntry(peerId, { status: 'loading', triedAt: now });
+      const recentlyTried = !!existing && now - (existing.triedAt ?? 0) < RETRY_MISSING_MS;
+
+      // Decide whether to (re)fetch Firebase. A GATT-named peer with no photo is a
+      // special case: GATT carries name/interests but no photo, so we still fetch
+      // Firebase to fill in a photo (this is what un-shadows the Xiaomi's avatar).
+      let doFetch: boolean;
+      if (!existing) doFetch = true;
+      else if (existing.status === 'loading') doFetch = false;
+      else if (existing.status === 'missing') doFetch = !recentlyTried;
+      else doFetch = existing.source === 'gatt' && !existing.photoURL && !recentlyTried;
+      if (!doFetch) continue;
+
+      // Stamp the attempt WITHOUT destroying a GATT entry's name/interests.
+      setProfileEntry(peerId, existing ? { ...existing, triedAt: now } : { status: 'loading', triedAt: now });
+
       void fetchProfile(peerId).then((p) => {
-        // A profile received directly from the peer over GATT is authoritative —
-        // never let a Firebase 'missing' (or a slower fetch) overwrite it.
-        if (useStore.getState().profiles[peerId]?.source === 'gatt') return;
+        const cur = useStore.getState().profiles[peerId];
+        // A GATT profile is authoritative for name/interests — only ever borrow a
+        // photo from Firebase to fill a gap; never overwrite the peer-supplied text.
+        if (cur?.source === 'gatt') {
+          if (p?.photoURL && !cur.photoURL) {
+            useStore.getState().setProfileEntry(peerId, { ...cur, photoURL: p.photoURL });
+          }
+          return;
+        }
         useStore.getState().setProfileEntry(
           peerId,
           p

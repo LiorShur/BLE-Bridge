@@ -41,10 +41,21 @@ let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
 let authReady: Promise<void> | null = null;
+// The real Firebase error from the last anonymous sign-in attempt, captured so
+// the UI can show WHY sign-in failed instead of a generic hint. Common codes:
+//   auth/admin-restricted-operation  → Anonymous provider disabled in console
+//   auth/network-request-failed      → offline / blocked
+//   auth/too-many-requests           → throttled (many new anon accounts)
+let lastAuthError: string | null = null;
 
 /** True when a backend is configured and reachable enough to try. */
 export function profilesEnabled(): boolean {
   return isFirebaseConfigured();
+}
+
+/** The last anonymous sign-in error code/message, or null if none/succeeded. */
+export function getLastAuthError(): string | null {
+  return lastAuthError;
 }
 
 /**
@@ -84,10 +95,17 @@ function ensureInit(): boolean {
   try {
     auth = initializeAuth(app, { persistence: getReactNativePersistence(AsyncStorage) });
     authReady = signInAnonymously(auth)
-      .then(() => undefined)
-      .catch(() => undefined);
-  } catch {
+      .then(() => {
+        lastAuthError = null;
+      })
+      .catch((e: unknown) => {
+        // Capture the real reason so the UI can show it (e.g. the Anonymous
+        // provider being disabled, network failure, or throttling).
+        lastAuthError = (e as { code?: string })?.code ?? (e as Error)?.message ?? 'auth/unknown';
+      });
+  } catch (e) {
     auth = null;
+    lastAuthError = (e as { code?: string })?.code ?? (e as Error)?.message ?? 'auth/init-failed';
     authReady = Promise.resolve();
   }
   return true;
