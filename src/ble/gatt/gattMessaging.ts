@@ -41,26 +41,39 @@ import { notifyIosMessage, onIosPeripheralMessage, onIosPeripheralMtu } from './
 
 const PUMP_MS = 300;
 const DEFAULT_MTU = 23;
-// Pace outbound frames so a multi-frame message (e.g. a photo, ~40–80 frames)
-// doesn't overrun the BLE transmit buffer and silently drop frames. One frame per
-// this interval. A single-frame text/ack is unaffected in practice.
-const FRAME_GAP_MS = 12;
+// A tiny gap between frames to let the radio breathe. Central writes are already
+// ATT-flow-controlled (write-with-response), so this mainly smooths the notify path.
+const FRAME_GAP_MS = 6;
+// When a transport reports "not sent" (iOS notify queue full), wait this long before
+// re-trying the SAME frame, up to MAX_FRAME_TRIES times. This is per-frame
+// backpressure — the piece that lets a multi-frame photo survive a full TX buffer.
+const BACKPRESSURE_MS = 60;
+const MAX_FRAME_TRIES = 20;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export type MessageHandler = (peerId: number, type: number, content: Uint8Array) => void;
 
 export class GattMessaging {
   private readonly client: GattClient;
   private readonly localPeerId: () => number;
-  private readonly outbound = new OutboundQueue();
+  // Longer retransmit window than the default so a multi-frame photo (which now
+  // drains serially and can take >1 s) fully lands before its first retransmit.
+  private readonly outbound = new OutboundQueue({ retryMs: 4000, maxTries: 6 });
   private readonly reassemblers = new Map<string, Reassembler>();
   private readonly targets = new Map<number, number>(); // msgId → peerId
   private peripheralMtu = DEFAULT_MTU;
   private nextMsgId = 1;
   private onMessageCb?: MessageHandler;
   private timer: ReturnType<typeof setInterval> | null = null;
-  private drainTimer: ReturnType<typeof setInterval> | null = null;
   // Paced outbound frame queue (message frames only; acks go immediately).
-  private outFrames: { peerId: number; b64: string }[] = [];
+  private outFrames: { peerId: number; msgId: number; b64: string; tries: number }[] = [];
+  // msgIds whose frames are currently queued/draining, so a retransmit doesn't pile
+  // a second copy on top of a send that's still in flight.
+  private queuedMsgIds = new Set<number>();
+  private draining = false;
   private subs: EmitterSubscription[] = [];
 
   constructor(client: GattClient, localPeerId: () => number) {
@@ -77,7 +90,6 @@ export class GattMessaging {
     this.pushSub(onIosPeripheralMtu((mtu) => (this.peripheralMtu = Math.max(this.peripheralMtu, mtu))));
 
     this.timer = setInterval(() => this.pump(Date.now()), PUMP_MS);
-    this.drainTimer = setInterval(() => this.drainOneFrame(), FRAME_GAP_MS);
   }
 
   onMessage(cb: MessageHandler): void {
@@ -97,10 +109,9 @@ export class GattMessaging {
 
   stop(): void {
     if (this.timer) clearInterval(this.timer);
-    if (this.drainTimer) clearInterval(this.drainTimer);
     this.timer = null;
-    this.drainTimer = null;
     this.outFrames = [];
+    this.queuedMsgIds.clear();
     for (const s of this.subs) s.remove();
     this.subs = [];
     this.reassemblers.clear();
@@ -129,29 +140,78 @@ export class GattMessaging {
     for (const s of send) {
       const peerId = this.targets.get(s.msgId);
       if (peerId === undefined) continue;
-      // Enqueue frames for paced sending rather than bursting them all at once.
-      for (const frame of s.frames) this.outFrames.push({ peerId, b64: bytesToBase64(frame) });
+      // Skip a message whose frames are still queued/draining from a prior (re)send
+      // — piling a second copy on top only congests the radio and never helps.
+      if (this.queuedMsgIds.has(s.msgId)) continue;
+      this.queuedMsgIds.add(s.msgId);
+      for (const frame of s.frames) {
+        this.outFrames.push({ peerId, msgId: s.msgId, b64: bytesToBase64(frame), tries: 0 });
+      }
     }
-    for (const msgId of failed) this.targets.delete(msgId);
+    for (const msgId of failed) {
+      this.targets.delete(msgId);
+      this.dropQueuedMsg(msgId);
+    }
+    this.kickDrain();
   }
 
-  /** Send one queued frame per tick — the pacing that keeps large messages intact. */
-  private drainOneFrame(): void {
-    const next = this.outFrames.shift();
-    if (next) this.writeFrameTo(next.peerId, next.b64);
+  /** Start the serialized drain if it isn't already running. */
+  private kickDrain(): void {
+    if (this.draining || this.outFrames.length === 0) return;
+    this.draining = true;
+    void this.drainLoop();
   }
 
-  /** Route one frame to a peer: central write if we dialed it, else peripheral notify. */
-  private writeFrameTo(peerId: number, b64: string): void {
+  /**
+   * Send queued frames one at a time, AWAITING each so we pace to the transport
+   * instead of bursting. A frame the transport couldn't send (iOS notify queue
+   * full) is put back and retried after a short wait, up to MAX_FRAME_TRIES; only
+   * then is the whole message's remainder dropped (the ack/retransmit re-sends it).
+   */
+  private async drainLoop(): Promise<void> {
+    try {
+      for (;;) {
+        const next = this.outFrames.shift();
+        if (!next) break;
+        const ok = await this.writeFrameTo(next.peerId, next.b64);
+        if (!ok) {
+          next.tries += 1;
+          if (next.tries <= MAX_FRAME_TRIES) {
+            this.outFrames.unshift(next); // hold this frame; the radio buffer is full
+            await delay(BACKPRESSURE_MS);
+            continue;
+          }
+          this.dropQueuedMsg(next.msgId); // give up on this send; retransmit will retry
+          continue;
+        }
+        // Last frame of this message just left → clear its mark so a later
+        // retransmit (if still unacked) is allowed to re-enqueue it.
+        if (!this.outFrames.some((f) => f.msgId === next.msgId)) this.queuedMsgIds.delete(next.msgId);
+        if (FRAME_GAP_MS > 0) await delay(FRAME_GAP_MS);
+      }
+    } finally {
+      this.draining = false;
+      // A retransmit may have queued more frames while we were awaiting — pick them up.
+      if (this.outFrames.length > 0) this.kickDrain();
+    }
+  }
+
+  /** Remove any queued frames for a message and clear its in-flight mark. */
+  private dropQueuedMsg(msgId: number): void {
+    this.outFrames = this.outFrames.filter((f) => f.msgId !== msgId);
+    this.queuedMsgIds.delete(msgId);
+  }
+
+  /**
+   * Route one frame to a peer and report whether the transport accepted it: central
+   * write (ATT-flow-controlled) if we dialed the peer, else peripheral notify. On
+   * the notify path iOS reports a full queue as `false`; a no-op module resolves
+   * `true` so it never stalls the drain on the platform it isn't running on.
+   */
+  private writeFrameTo(peerId: number, b64: string): Promise<boolean> {
     const deviceId = this.client.deviceIdForPeer(peerId);
-    if (deviceId) {
-      void this.client.writeMessageFrame(deviceId, b64);
-    } else {
-      // We're the peripheral for this peer — broadcast. Each notify is a no-op on
-      // the platform whose native module is absent, so calling both is safe.
-      void notifyGattMessage(b64);
-      void notifyIosMessage(b64);
-    }
+    if (deviceId) return this.client.writeMessageFrame(deviceId, b64);
+    return Promise.all([notifyGattMessage(b64), notifyIosMessage(b64)]).then(([a, i]) => a && i);
   }
 
   private ackToChannel(channelKey: string, deviceId: string | null, ackB64: string): void {

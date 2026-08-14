@@ -19,6 +19,30 @@ import { saveProfile, uploadProfilePhoto, ensureSignedIn, getLastAuthError } fro
 import { saveMyProfileLocal } from '../identity/persistentId';
 import { CATALOGS, catalogInterests, MAX_INTERESTS } from '../discovery/interests';
 
+/**
+ * Turn the real Firestore/auth error codes into a targeted, honest hint. We only
+ * name a specific cause when the code points there — no more blanket "enable
+ * Anonymous sign-in" when it's already on. The backend is optional, so every hint
+ * ends by reassuring that identity still reaches nearby peers over Bluetooth.
+ */
+function authHintFor(code: string | null, authErr: string | null, signedIn: boolean): string {
+  const overGatt = 'Your name and photo still reach nearby people over Bluetooth — you can continue.';
+  const c = `${code ?? ''} ${authErr ?? ''}`;
+  if (/admin-restricted-operation|configuration-not-found/.test(c)) {
+    return `Anonymous sign-in looks disabled for this project (Authentication → Sign-in method). ${overGatt}`;
+  }
+  if (/too-many-requests/.test(c)) {
+    return `Firebase is rate-limiting new anonymous sessions on this device; try again in a bit. ${overGatt}`;
+  }
+  if (/network-request-failed|unavailable|deadline-exceeded/.test(c)) {
+    return `Looks like a network problem reaching Firebase. ${overGatt}`;
+  }
+  if (/permission-denied/.test(c)) {
+    return `Firestore rules rejected the write${signedIn ? '' : ' (not signed in)'}. ${overGatt}`;
+  }
+  return overGatt;
+}
+
 export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactElement {
   const localPeerId = useStore((s) => s.localPeerId);
   const myName = useStore((s) => s.myName);
@@ -109,9 +133,9 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
     setError(null);
     const finalName = name.trim();
 
-    // Whether anonymous auth actually signed us in. If not, every cloud write is
-    // denied (rules require auth) — the usual cause is the Anonymous provider
-    // being disabled in Firebase. Surfacing this makes the failure diagnosable.
+    // Whether anonymous auth actually signed us in. If not, cloud writes are denied
+    // (rules require auth). We don't assume WHY here — the real code is reported
+    // below (getLastAuthError) so the cause is diagnosable rather than guessed.
     const signedIn = await ensureSignedIn();
 
     // Resolve the photo, but NEVER let a photo failure block saving the name.
@@ -139,32 +163,31 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
       activeCatalogId: catalogId,
       visibility,
     });
-    let nameOk = true;
+    let nameErr: string | null = null;
     // Persist interests/headline to the backend too (only meaningful with a name,
     // since the profile doc is keyed to a named identity peers can look up).
     if (finalName) {
-      nameOk = await saveProfile(localPeerId, {
+      const res = await saveProfile(localPeerId, {
         name: finalName,
         photoURL: finalPhoto,
         ...(interests.length ? { interests } : {}),
         ...(finalHeadline ? { headline: finalHeadline } : {}),
       });
+      if (!res.ok) nameErr = res.error ?? 'write-failed';
     }
     setSaving(false);
 
-    if (photoError || !nameOk) {
-      // Surface the REAL sign-in error code when we couldn't authenticate, so a
-      // failure is diagnosable (disabled provider vs. throttling vs. network)
-      // rather than a generic guess.
+    if (photoError || nameErr) {
+      // Report the REAL codes — the Firestore write error and the anonymous-auth
+      // error — instead of guessing. `authHint` only names the provider when the
+      // code actually points there; over-photos still show over GATT regardless.
       const authErr = getLastAuthError();
-      const hint = !signedIn
-        ? ` Not signed in to Firebase${authErr ? ` (${authErr})` : ''} — enable Anonymous sign-in (Authentication → Sign-in method).`
-        : '';
       const parts: string[] = [];
-      if (!nameOk) parts.push('Name save failed.');
-      else parts.push('Name saved.');
+      parts.push(nameErr ? `Name save failed (${nameErr}).` : 'Name saved.');
       if (photoError) parts.push(`Photo upload failed (${photoError}).`);
-      setError(`${parts.join(' ')}${hint} Retry or continue.`);
+      if (!signedIn) parts.push(`Firebase sign-in failed${authErr ? ` (${authErr})` : ''}.`);
+      parts.push(authHintFor(nameErr ?? photoError, authErr, signedIn));
+      setError(parts.filter(Boolean).join(' ').trim());
       return;
     }
     if (finalPhoto) {

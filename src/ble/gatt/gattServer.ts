@@ -63,12 +63,18 @@ export async function gattServerStatus(): Promise<{ running: boolean; subscriber
   }
 }
 
-/** Notify one message frame (pre-chunked to the MTU) to subscribed centrals. */
-export async function notifyGattMessage(frameBase64: string): Promise<void> {
+/**
+ * Notify one message frame (pre-chunked to the MTU) to subscribed centrals.
+ * Resolves whether the native call succeeded. Android's notifyCharacteristicChanged
+ * doesn't surface per-frame queue-full the way iOS does, so this reports true on the
+ * normal path; the message-level ack/retransmit still covers a dropped notify.
+ */
+export async function notifyGattMessage(frameBase64: string): Promise<boolean> {
   try {
     await mod()?.notifyMessage(frameBase64);
+    return true;
   } catch {
-    /* best-effort — the ack/retransmit layer covers a dropped notify */
+    return false;
   }
 }
 

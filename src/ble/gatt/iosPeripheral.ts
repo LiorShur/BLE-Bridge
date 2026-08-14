@@ -63,12 +63,20 @@ export async function iosPeripheralStatus(): Promise<{ running: boolean; subscri
   }
 }
 
-/** Notify one message frame (pre-chunked to the notify size) to subscribed centrals. */
-export async function notifyIosMessage(frameBase64: string): Promise<void> {
+/**
+ * Notify one message frame (pre-chunked to the notify size) to subscribed centrals.
+ * Resolves the native updateValue result: `false` means the iOS transmit queue was
+ * full and the frame was NOT sent — the paced drain uses this to hold and retry
+ * rather than lose the frame (this is what makes a multi-frame photo survive).
+ * Resolves `true` when the module is absent (Android) so it never blocks the drain.
+ */
+export async function notifyIosMessage(frameBase64: string): Promise<boolean> {
+  const m = mod();
+  if (!m) return true; // not the iOS peripheral — nothing to send here, don't stall
   try {
-    await mod()?.notifyMessage(frameBase64);
+    return await m.notifyMessage(frameBase64);
   } catch {
-    /* best-effort — ack/retransmit covers a dropped notify */
+    return false; // treat an error like a full queue: hold and retry
   }
 }
 

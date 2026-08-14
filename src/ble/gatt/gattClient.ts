@@ -109,12 +109,19 @@ export class GattClient {
     }
   }
 
-  /** Write one message frame (pre-chunked to the MTU) to a connected peer. */
-  writeMessageFrame(deviceId: string, frameBase64: string): Promise<void> {
+  /**
+   * Write one message frame (pre-chunked to the MTU) to a connected peer, and
+   * resolve whether it was written. We use write-WITH-response deliberately: it is
+   * ATT-flow-controlled, so a multi-frame message (a photo) can't overrun the
+   * transmit buffer and silently drop frames the way write-without-response does.
+   * A single-frame text is unaffected. Returns false on failure so the paced drain
+   * can hold and retry rather than race ahead.
+   */
+  writeMessageFrame(deviceId: string, frameBase64: string): Promise<boolean> {
     return this.manager
-      .writeCharacteristicWithoutResponseForDevice(deviceId, BRIDGE_SERVICE_UUID, MESSAGE_CHAR_UUID, frameBase64)
-      .then(() => undefined)
-      .catch(() => undefined); // best-effort; ack/retransmit covers a failed write
+      .writeCharacteristicWithResponseForDevice(deviceId, BRIDGE_SERVICE_UUID, MESSAGE_CHAR_UUID, frameBase64)
+      .then(() => true)
+      .catch(() => false); // ack/retransmit + the drain's backpressure cover a failed write
   }
 
   /** Negotiated MTU for a connected peer (by deviceId), or the default. */

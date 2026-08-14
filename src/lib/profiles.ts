@@ -58,6 +58,10 @@ export function getLastAuthError(): string | null {
   return lastAuthError;
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Resolve once anonymous auth has settled, returning whether we actually have a
  * signed-in user. If this is false, every Firestore/Storage WRITE will be denied
@@ -65,13 +69,24 @@ export function getLastAuthError(): string | null {
  * sign-in provider not being enabled in the Firebase console.
  */
 export async function ensureSignedIn(): Promise<boolean> {
-  if (!ensureInit()) return false;
+  if (!ensureInit() || !auth) return false;
+  // Wait for the sign-in kicked off in ensureInit, but never hang the UI on it.
   try {
-    if (authReady) await authReady;
+    await Promise.race([authReady ?? Promise.resolve(), delay(6000)]);
   } catch {
     /* ignore */
   }
-  return !!auth?.currentUser;
+  if (auth.currentUser) return true;
+  // The initial attempt didn't leave us with a user (a transient failure, a race,
+  // or persistence not restoring one). Try once more, explicitly, so we either get
+  // signed in or capture the REAL error code for the UI instead of guessing.
+  try {
+    await signInAnonymously(auth);
+    lastAuthError = null;
+  } catch (e) {
+    lastAuthError = (e as { code?: string })?.code ?? (e as Error)?.message ?? 'auth/unknown';
+  }
+  return !!auth.currentUser;
 }
 
 function ensureInit(): boolean {
@@ -189,9 +204,20 @@ export async function uploadProfilePhoto(peerId: number, localUri: string): Prom
   }
 }
 
-/** Write (merge) the local user's profile under its peerId. Returns success. */
-export async function saveProfile(peerId: number, profile: Profile): Promise<boolean> {
-  if (!ensureInit() || !db) return false;
+export interface SaveResult {
+  ok: boolean;
+  /** Firestore error code (e.g. 'permission-denied', 'unavailable') when ok is false. */
+  error?: string;
+}
+
+/**
+ * Write (merge) the local user's profile under its peerId. Returns the REAL
+ * Firestore error code on failure ('permission-denied' → rules/auth,
+ * 'unavailable' → network) so the UI can report the actual cause rather than
+ * assuming one.
+ */
+export async function saveProfile(peerId: number, profile: Profile): Promise<SaveResult> {
+  if (!ensureInit() || !db) return { ok: false, error: 'firebase-unconfigured' };
   try {
     if (authReady) await authReady;
     // Always write name/photo; write interests/headline explicitly (including the
@@ -204,8 +230,9 @@ export async function saveProfile(peerId: number, profile: Profile): Promise<boo
       updatedAt: serverTimestamp(),
     };
     await setDoc(doc(db, PROFILES, String(peerId >>> 0)), docData, { merge: true });
-    return true;
-  } catch {
-    return false;
+    return { ok: true };
+  } catch (e) {
+    const code = (e as { code?: string })?.code ?? (e as Error)?.message ?? 'write-failed';
+    return { ok: false, error: code };
   }
 }

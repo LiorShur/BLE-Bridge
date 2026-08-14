@@ -187,13 +187,27 @@ Types are a small enum so unknown types are ignored forward-compatibly.
   which is authoritative — `useProfiles` won't let a Firebase result overwrite a
   GATT-supplied profile. This gives peers your identity **with no backend**, and
   fixes the iOS case where the Firebase JS SDK's anonymous auth fails to sign in.
-  ✅ **Photo-over-GATT**: a small 256px/q0.5 thumbnail (captured at pick time as
-  base64, ~10–25 KB) is sent as a **separate** PHOTO message so the tiny name
+  ✅ **Photo-over-GATT**: a small 128px/q0.5 thumbnail (captured at pick time as
+  base64, ~4–8 KB) is sent as a **separate** PHOTO message so the tiny name
   PROFILE still arrives instantly and the avatar fills in after. The receiver turns
-  the raw bytes into a `data:` URI. Outbound frames are **paced** (one per ~12 ms,
-  `gattMessaging.ts`) so a multi-frame photo doesn't overrun the BLE buffer; a
-  single-frame text/ack is unaffected. Large-photo reliability may still want
-  flow-control tuning on some radios.
+  the raw bytes into a `data:` URI.
+  **Flow control (multi-frame reliability).** A photo is dozens of frames, and the
+  first cut dropped them silently. The transport is now back-pressured end to end
+  (`gattMessaging.ts` serialized `drainLoop`):
+  - **Central → peripheral** frames use **write-WITH-response**
+    (`gattClient.writeMessageFrame`), which is ATT-flow-controlled, so the sender
+    can't outrun the link.
+  - **Peripheral → central** notifies read the native `updateValue` result — iOS
+    returns `false` when its TX queue is full (`notifyIosMessage` now propagates
+    it). A frame reported not-sent is **held and retried** (up to `MAX_FRAME_TRIES`)
+    instead of lost.
+  - The drain sends **one frame at a time, awaiting each**, and a retransmit never
+    piles a second copy on a send still in flight (`queuedMsgIds`). The retransmit
+    window is widened to 4 s so a multi-frame photo lands before its first retry.
+
+  A single-frame text/ack is unaffected. Android's peripheral notify can't surface
+  per-frame queue-full, but that path isn't on the Android↔iPhone photo route
+  (Android is always the central toward an iPhone).
 
 ### Known limitation
 Messaging needs a GATT connection, so it works **iPhone↔Android** and
