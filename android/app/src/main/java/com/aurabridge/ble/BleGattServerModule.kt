@@ -13,6 +13,8 @@ import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Base64
 import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.Arguments
@@ -70,6 +72,15 @@ class BleGattServerModule(private val reactContext: ReactApplicationContext) :
   private val msgSubscribers: MutableSet<BluetoothDevice> =
       Collections.synchronizedSet(mutableSetOf())
 
+  // Outbound message-notify queue. A GATT server may have only ONE notification in
+  // flight per connection — the next must wait for onNotificationSent, or Android
+  // silently drops it. Without this, back-to-back frames/acks vanish, which is why
+  // Android↔Android chat (the first path to use the SERVER notify direction) was
+  // one-directional and laggy. We serialize here and pace on onNotificationSent.
+  private val notifyQueue: ArrayDeque<Pair<BluetoothDevice, ByteArray>> = ArrayDeque()
+  private var notifyInFlight = false
+  private val mainHandler = Handler(Looper.getMainLooper())
+
   override fun getName(): String = NAME
 
   private val serverCallback =
@@ -78,7 +89,21 @@ class BleGattServerModule(private val reactContext: ReactApplicationContext) :
           if (newState == BluetoothProfile.STATE_DISCONNECTED) {
             subscribers.remove(device)
             msgSubscribers.remove(device)
+            // Drop this device's queued notifies; if it held the in-flight slot we
+            // won't get onNotificationSent for it, so free the slot and keep pumping.
+            synchronized(notifyQueue) {
+              notifyQueue.removeAll { it.first == device }
+              notifyInFlight = false
+            }
+            pumpNotify()
           }
+        }
+
+        // The previous notification finished — send the next queued one. This is the
+        // pacing that makes server→central notifies reliable.
+        override fun onNotificationSent(device: BluetoothDevice, status: Int) {
+          synchronized(notifyQueue) { notifyInFlight = false }
+          pumpNotify()
         }
 
         override fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
@@ -286,31 +311,50 @@ class BleGattServerModule(private val reactContext: ReactApplicationContext) :
    */
   @ReactMethod
   fun notifyMessage(dataBase64: String, promise: Promise) {
-    UiThreadUtil.runOnUiThread {
-      val bytes =
-          try {
-            Base64.decode(dataBase64, Base64.NO_WRAP)
-          } catch (e: IllegalArgumentException) {
-            promise.reject("INVALID_BASE64", "Frame failed to decode.")
-            return@runOnUiThread
-          }
-      val server = gattServer
-      val characteristic = messageChar
-      if (server == null || characteristic == null) {
-        promise.resolve(null) // server not running
-        return@runOnUiThread
-      }
-      characteristic.value = bytes
-      val targets = synchronized(msgSubscribers) { msgSubscribers.toList() }
-      try {
-        for (device in targets) {
-          server.notifyCharacteristicChanged(device, characteristic, false)
+    val bytes =
+        try {
+          Base64.decode(dataBase64, Base64.NO_WRAP)
+        } catch (e: IllegalArgumentException) {
+          promise.reject("INVALID_BASE64", "Frame failed to decode.")
+          return
         }
-        promise.resolve(null)
-      } catch (e: SecurityException) {
-        promise.reject("PERMISSION_DENIED", "BLUETOOTH_CONNECT not granted.")
-      } catch (e: Exception) {
-        promise.reject("INTERNAL_ERROR", e.message ?: "notify failed.")
+    val targets = synchronized(msgSubscribers) { msgSubscribers.toList() }
+    // Queue one notify per subscribed central; the pump sends them one at a time,
+    // waiting for onNotificationSent between each. Resolves immediately — delivery
+    // is asynchronous and the JS ack/retransmit layer covers any residual loss.
+    synchronized(notifyQueue) {
+      for (device in targets) notifyQueue.addLast(Pair(device, bytes))
+    }
+    pumpNotify()
+    promise.resolve(null)
+  }
+
+  /** Send the next queued notify if none is in flight (main thread; serialized). */
+  private fun pumpNotify() {
+    UiThreadUtil.runOnUiThread {
+      val server = gattServer ?: return@runOnUiThread
+      val characteristic = messageChar ?: return@runOnUiThread
+      val head =
+          synchronized(notifyQueue) {
+            if (notifyInFlight) return@runOnUiThread
+            val h = notifyQueue.firstOrNull() ?: return@runOnUiThread
+            notifyInFlight = true
+            h
+          }
+      characteristic.value = head.second
+      val ok =
+          try {
+            server.notifyCharacteristicChanged(head.first, characteristic, false)
+          } catch (e: Exception) {
+            false
+          }
+      if (ok) {
+        // Sent — drop it and wait for onNotificationSent to release the slot.
+        synchronized(notifyQueue) { notifyQueue.removeFirstOrNull() }
+      } else {
+        // Not accepted (congestion / stack busy). Keep it queued and retry shortly.
+        synchronized(notifyQueue) { notifyInFlight = false }
+        mainHandler.postDelayed({ pumpNotify() }, 30)
       }
     }
   }

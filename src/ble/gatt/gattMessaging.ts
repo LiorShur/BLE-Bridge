@@ -59,9 +59,10 @@ export type MessageHandler = (peerId: number, type: number, content: Uint8Array)
 export class GattMessaging {
   private readonly client: GattClient;
   private readonly localPeerId: () => number;
-  // Longer retransmit window than the default so a multi-frame photo (which now
-  // drains serially and can take >1 s) fully lands before its first retransmit.
-  private readonly outbound = new OutboundQueue({ retryMs: 4000, maxTries: 6 });
+  // Retransmit window: long enough that a multi-frame photo fully drains before a
+  // retry (the queuedMsgIds guard also prevents mid-drain re-enqueue), short enough
+  // that a dropped chat line recovers quickly.
+  private readonly outbound = new OutboundQueue({ retryMs: 2500, maxTries: 6 });
   private readonly reassemblers = new Map<string, Reassembler>();
   private readonly targets = new Map<number, number>(); // msgId → peerId
   private peripheralMtu = DEFAULT_MTU;
