@@ -87,6 +87,13 @@ export class GattClient {
    * message characteristic (older build) simply never delivers frames.
    */
   private attachMessaging(device: Device, conn: Conn): void {
+    // Ask Android for a HIGH-priority connection (fast ~15 ms interval). Without
+    // this, an Android↔Android link sits at the default balanced/low-power interval
+    // (tens to hundreds of ms per ATT op), so chat lags several seconds; iOS already
+    // negotiates a fast interval, which is why Android↔iPhone feels instant. The
+    // interval applies to the whole link, so this speeds BOTH directions. No-op on
+    // iOS. 1 = ConnectionPriority.High.
+    void device.requestConnectionPriority(1).catch(() => undefined);
     device
       .requestMTU(TARGET_MTU)
       .then((d: Device) => {
