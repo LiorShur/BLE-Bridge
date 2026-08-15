@@ -211,11 +211,22 @@ Types are a small enum so unknown types are ignored forward-compatibly.
   per-frame queue-full, but that path isn't on the Android↔iPhone photo route
   (Android is always the central toward an iPhone).
 
-### Known limitation
-Messaging needs a GATT connection, so it works **iPhone↔Android** and
-**iPhone↔iPhone**, NOT **Android↔Android** (connectionless by design — CLAUDE.md
-§3.1). The chat UI says so. Android↔Android chat would require re-enabling an
-Android↔Android GATT link (removed in the interop-always-on refactor).
+### Android↔Android messaging (2026-08-15, owner request)
+Messaging needs a GATT connection. It now works across **all** pairings, including
+**Android↔Android**: when two Androids bond, the **lower-`peerId`** side dials the
+other over GATT (`useBondEngine` → `gattClient.ensureConnected`), reusing the
+message characteristic both already host for the iPhone path. The higher-`peerId`
+side is the peripheral its GATT server already serves. Role tie-break guarantees
+exactly one connection. This reuses existing infra — both Androids already
+advertise **connectable + service UUID** in interop mode and run the GATT server;
+only the *wiring* (a dial for bonded Android peers) was missing.
+
+The connectionless bond/beam is **unchanged** — this is a separate link used only
+for the message channel, formed on bond and torn down when the peer goes stale.
+Cost: one managed GATT connection per bonded Android pair (reconnects on MAC
+rotation via the peerId-keyed `ensureConnected`, GATT-133 backoff, a little battery)
+— an accepted trade for cross-Android chat. This extends CLAUDE.md §3.1 the same
+way the iPhone interop path did.
 
 M1 is the whole hard, testable core — the part you cannot debug by looking at a
 phone — and lands first, exactly like `payload.ts` and the discovery brain did.

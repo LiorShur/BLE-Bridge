@@ -5,8 +5,10 @@
  * box; sending calls store.sendChat, which shows the line optimistically and hands
  * it to the GATT transport. Inbound text arrives via useBondEngine → pushChatMessage.
  *
- * Messaging needs a GATT connection, so it works iPhone↔Android and iPhone↔iPhone
- * — not Android↔Android (connectionless by design). A gentle note says so.
+ * Messaging needs a GATT connection. It works across all pairings — iPhone↔Android,
+ * iPhone↔iPhone, and Android↔Android (the last opens a dedicated GATT link between
+ * two bonded Androids; see useBondEngine + GATT_MESSAGING_SPEC). The bond/beam stays
+ * connectionless; only the message channel uses a connection.
  *
  * NOTE: depends on React Native; not part of the pure-logic test suite.
  */
@@ -78,8 +80,8 @@ export function ChatSheet(): React.ReactElement | null {
           <ScrollView ref={scrollRef} style={styles.list} contentContainerStyle={styles.listContent}>
             {messages.length === 0 ? (
               <Text style={styles.empty}>
-                Say hi 👋{'\n'}Messages send directly, phone-to-phone — no internet. Works over a
-                direct link (iPhone ↔ Android).
+                Say hi 👋{'\n'}Messages send directly, phone-to-phone — no internet, once you’re
+                bonded and connected.
               </Text>
             ) : (
               messages.map((m) => (

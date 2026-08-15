@@ -96,8 +96,17 @@ degradation for free.
 **Constraint this imposes:** ~24 usable payload bytes, one-way, no
 acknowledgement. The payload spec in `docs/PAYLOAD_SPEC.md` is designed to fit.
 
-Advertising is set **non-connectable** (`setConnectable(false)`). This is not an
-oversight.
+Advertising is set **non-connectable** (`setConnectable(false)`) in the
+connectionless default. This is not an oversight.
+
+**Scope change (2026-08-15, owner request):** two paths now open a real GATT
+connection on top of the connectionless beacon — (1) the iPhone interop path, and
+(2) **Android↔Android messaging** (chat needs a connection; when two Androids bond,
+the lower-`peerId` one dials the other — `useBondEngine` → `ensureConnected`,
+`docs/GATT_MESSAGING_SPEC.md`). In interop mode the advertisement is **connectable**
+and carries the service UUID so a peer can dial the GATT server. The bond/beam
+itself stays connectionless and unchanged; the connection carries only the profile
++ message channels.
 
 ### 3.2 The alignment gate
 

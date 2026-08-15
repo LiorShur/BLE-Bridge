@@ -106,6 +106,10 @@ export function useBondEngine(
   const lastAckNonceByPeer = useRef<Map<number, number>>(new Map());
   // Transport the last observation for each peer arrived over.
   const transportByPeer = useRef<Map<number, 'adv' | 'gatt'>>(new Map());
+  // Latest ble-plx device id seen for each peer via the connectionless scan — used
+  // to dial an Android peer over GATT for messaging (Android↔Android chat). The MAC
+  // rotates ~every 15 min; we keep the freshest so a reconnect targets the new one.
+  const deviceIdByPeer = useRef<Map<number, string>>(new Map());
 
   // Main effect: scan + publish. Deliberately does NOT depend on gattEnabled, so
   // toggling the interop path never restarts the scan (which MIUI throttles).
@@ -157,6 +161,10 @@ export function useBondEngine(
       if (transport === 'gatt' || !gattRef.current?.isConnected(eo.peerId)) {
         transportByPeer.current.set(eo.peerId, transport);
       }
+      // Remember where to dial this peer for Android↔Android messaging. Only the
+      // connectionless (adv) sighting carries a real Android MAC; a GATT-sourced
+      // observation reuses that same id, so don't overwrite it with an empty one.
+      if (transport === 'adv' && obs.deviceId) deviceIdByPeer.current.set(eo.peerId, obs.deviceId);
 
       handleReactionsAndAcks(obs.payload, eo.peerId, next.machine.bonded);
       return next;
@@ -208,6 +216,7 @@ export function useBondEngine(
         if (isRemoved(ticked)) {
           peers.current.delete(id);
           transportByPeer.current.delete(id);
+          deviceIdByPeer.current.delete(id);
         } else {
           peers.current.set(id, ticked);
         }
@@ -224,6 +233,21 @@ export function useBondEngine(
         for (const [id, tr] of transportByPeer.current) map[id] = tr;
         store.setPeerTransports(map);
         store.setGattStatus({ connections: gatt.activeCount() });
+
+        // Android↔Android messaging: open a GATT link to a bonded Android peer so
+        // chat (which needs a connection) works between two Androids, not just when
+        // an iPhone is involved. Role tie-break — only the LOWER peerId dials, so
+        // exactly one connection forms; the higher-id side is the peripheral its
+        // GATT server already serves. The bond/beam stays connectionless; this is a
+        // separate link used only for the message characteristic.
+        const me = localPeerIdRef.current >>> 0;
+        for (const state of peers.current.values()) {
+          if (!state.machine.bonded) continue;
+          const pid = state.peerId >>> 0;
+          if (me >= pid) continue; // only the lower id dials
+          const deviceId = deviceIdByPeer.current.get(pid);
+          if (deviceId) gatt.ensureConnected(deviceId, pid, (g) => ingest(g, 'gatt'), onGattErr);
+        }
       }
 
       // Serverless profile exchange (GATT_MESSAGING_SPEC §3): once bonded, push my
