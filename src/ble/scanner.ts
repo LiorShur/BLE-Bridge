@@ -49,11 +49,32 @@ function advertisesBridgeService(device: Device): boolean {
   return uuids.some((u) => u.toLowerCase() === BRIDGE_SERVICE_UUID);
 }
 
+interface ScanObservers {
+  onObservation: ScanObserver;
+  onError?: (error: Error) => void;
+  onGattCandidate?: GattCandidateObserver;
+  now: () => number;
+}
+
+// Minimum spacing between scan restarts, to stay well under Android's hard limit of
+// 5 startScan() calls per 30 s. A mode change inside this window is deferred.
+const SCAN_MODE_MIN_INTERVAL_MS = 8000;
+
 export class BleScanner {
   private manager: BleManager;
   private scanning = false;
   private scanActive = false;
   private stateSub: Subscription | null = null;
+  private observers: ScanObservers | null = null;
+  // Radio duty cycle. LowLatency (~100%) gives a snappy beam but starves a
+  // concurrent GATT connection — so we drop to Balanced while chatting (see
+  // setScanMode / useBondEngine). Default is LowLatency for the AR experience.
+  // `scanModeCur` is the DESIRED mode; `scanModeActive` is what the running scan
+  // actually uses — they differ briefly while a restart is throttled.
+  private scanModeCur: ScanMode = ScanMode.LowLatency;
+  private scanModeActive: ScanMode = ScanMode.LowLatency;
+  private lastScanStartAt = 0;
+  private reconcileTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(manager?: BleManager) {
     this.manager = manager ?? new BleManager();
@@ -79,12 +100,13 @@ export class BleScanner {
   ): void {
     if (this.scanning) return;
     this.scanning = true;
+    this.observers = { onObservation, onError, onGattCandidate, now };
 
     // emitCurrentState=true fires immediately with the current state, then on
     // changes — so if BLE is already on we scan at once, else we wait for it.
     this.stateSub = this.manager.onStateChange((state) => {
       if (state === State.PoweredOn) {
-        this.beginScan(onObservation, onError, onGattCandidate, now);
+        this.beginScan();
       } else if (
         state === State.PoweredOff ||
         state === State.Unauthorized ||
@@ -97,17 +119,15 @@ export class BleScanner {
     }, true);
   }
 
-  private beginScan(
-    onObservation: ScanObserver,
-    onError: ((error: Error) => void) | undefined,
-    onGattCandidate: GattCandidateObserver | undefined,
-    now: () => number,
-  ): void {
-    if (this.scanActive) return; // already scanning (state can re-emit PoweredOn)
+  private beginScan(): void {
+    if (this.scanActive || !this.observers) return; // already scanning (state can re-emit PoweredOn)
     this.scanActive = true;
+    const { onObservation, onError, onGattCandidate, now } = this.observers;
+    this.lastScanStartAt = now();
+    this.scanModeActive = this.scanModeCur;
     this.manager.startDeviceScan(
       null, // no UUID filter — we filter on manufacturer data in JS
-      { allowDuplicates: true, scanMode: ScanMode.LowLatency },
+      { allowDuplicates: true, scanMode: this.scanModeActive },
       (error, device: Device | null) => {
         if (error) {
           this.scanActive = false;
@@ -146,6 +166,10 @@ export class BleScanner {
 
   stop(): void {
     if (!this.scanning) return;
+    if (this.reconcileTimer) {
+      clearTimeout(this.reconcileTimer);
+      this.reconcileTimer = null;
+    }
     this.stateSub?.remove();
     this.stateSub = null;
     if (this.scanActive) this.manager.stopDeviceScan();
@@ -155,6 +179,37 @@ export class BleScanner {
 
   isScanning(): boolean {
     return this.scanning;
+  }
+
+  /**
+   * Switch the scan duty cycle. We drop to Balanced while a chat is open so the
+   * GATT connection isn't starved by a 100%-duty LowLatency scan (the cause of
+   * laggy/inconsistent Android↔Android chat), then back to LowLatency for a snappy
+   * beam. Changing mode restarts the scan, which Android throttles (>5 startScan/30 s
+   * is blocked), so restarts are spaced ≥ SCAN_MODE_MIN_INTERVAL_MS apart; if a
+   * change lands inside that window it's applied by a one-shot reconcile timer.
+   */
+  setScanMode(mode: ScanMode): void {
+    this.scanModeCur = mode;
+    this.reconcileScanMode();
+  }
+
+  private reconcileScanMode(): void {
+    if (!this.scanActive || !this.observers) return; // applies on the next beginScan
+    if (this.scanModeCur === this.scanModeActive) return; // already in the desired mode
+    const since = this.observers.now() - this.lastScanStartAt;
+    if (since < SCAN_MODE_MIN_INTERVAL_MS) {
+      if (!this.reconcileTimer) {
+        this.reconcileTimer = setTimeout(() => {
+          this.reconcileTimer = null;
+          this.reconcileScanMode();
+        }, SCAN_MODE_MIN_INTERVAL_MS - since + 50);
+      }
+      return;
+    }
+    this.manager.stopDeviceScan();
+    this.scanActive = false;
+    this.beginScan();
   }
 
   destroy(): void {

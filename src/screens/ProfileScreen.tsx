@@ -308,7 +308,7 @@ export function ProfileScreen({ onDone }: { onDone: () => void }): React.ReactEl
         </Pressable>
         {/* Build marker — lets us confirm the phone is running the latest JS
             (the iOS build compiles from a copy in ios-shell/, easy to miss). */}
-        <Text style={styles.buildTag}>build: aa-chat-3</Text>
+        <Text style={styles.buildTag}>build: aa-chat-4</Text>
       </View>
     </ScrollView>
   );

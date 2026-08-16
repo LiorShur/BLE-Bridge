@@ -15,7 +15,8 @@
  * NOTE: depends on React Native; not part of the pure-logic test suite.
  */
 import { useEffect, useRef } from 'react';
-import { BleManager } from 'react-native-ble-plx';
+import { Platform } from 'react-native';
+import { BleManager, ScanMode } from 'react-native-ble-plx';
 import { BleScanner, type ScanObservation } from '../ble/scanner';
 import { GattClient } from '../ble/gatt/gattClient';
 import { GattMessaging } from '../ble/gatt/gattMessaging';
@@ -311,6 +312,20 @@ export function useBondEngine(
       transportByPeer.current.clear();
     };
   }, [enabled, onScanError]);
+
+  // Free the radio for the GATT connection while a chat is open. A 100%-duty
+  // LowLatency scan starves a concurrent connection, which is why Android↔Android
+  // chat lagged and stuttered (iOS negotiates a fast interval, so it wasn't as
+  // visible there). Balanced (~25% duty) lets the connection breathe; the beam is
+  // less snappy meanwhile, but the chat modal covers the AR view anyway. Back to
+  // LowLatency when the chat closes so the bridge is responsive again.
+  const chatOpen = useStore((s) => s.chatPeerId != null);
+  useEffect(() => {
+    // Android only — iOS ignores scanMode (ble-plx), so switching it there would
+    // just churn the scan. iOS negotiates a fast connection interval anyway.
+    if (!enabled || Platform.OS !== 'android') return;
+    scannerRef.current?.setScanMode(chatOpen ? ScanMode.Balanced : ScanMode.LowLatency);
+  }, [enabled, chatOpen]);
 
   // GATT central lifecycle — SEPARATE effect keyed on gattEnabled, reusing the
   // scan's BleManager. Toggling interop creates/destroys only the GattClient; the
