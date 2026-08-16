@@ -22,11 +22,32 @@ only insofar as it serves that.
 
 Do not build these unless explicitly asked:
 
-- iOS support (Android only — this removes most of the BLE complexity)
+- ~~iOS support (Android only — this removes most of the BLE complexity)~~
+  **Scope change (2026-08-11, owner request):** Android↔iOS interop IS now in
+  scope. iOS cannot advertise manufacturer data, so the interop path is
+  GATT-based (`docs/GATT_SPEC.md`, `docs/IOS_INTEROP.md`) — dual-stack with the
+  connectionless Android↔Android path. Build: `docs/IOS_SETUP.md`. P-i2a (iPhone
+  as GATT central) uses ble-plx's iOS central + minimal app changes; P-i2b adds a
+  Swift `CBPeripheralManager` so the iPhone is discoverable too.
 - GATT connections, pairing, or bonding (see §3.1 — the design is connectionless)
 - Background operation (foreground only; screen on, app open)
-- More than two simultaneous peers (the data model allows N, the UI assumes 1)
-- Accounts, backend, persistence, analytics
+- ~~More than two simultaneous peers (the data model allows N, the UI assumes 1)~~
+  **Scope change (2026-08-09, owner request):** multiple simultaneous peers ARE
+  now in scope. The signal layer already handled N; the UI renders all active
+  bonds. Build order: get two devices solid first, then generalise the visual to N.
+- ~~Accounts, backend, persistence, analytics~~
+  **Scope change (2026-08-10, owner request):** an *optional* backend for peer
+  identity is now in scope — a tiny public profile ({name, photoURL}) fetched on
+  bond, keyed by a now-persistent `peerId` (Firebase JS SDK, anonymous auth). It
+  degrades to the anonymous hue + #TAG when unconfigured/offline. Still no
+  accounts and no analytics. The BLE payload is unchanged — identity still rides
+  `peerId`; only the name/photo lookup is out-of-band.
+  **Extended (2026-08-12):** the profile also carries optional discovery fields
+  `{interests[], headline}` for the "someone nearby you should meet" feature
+  (`docs/DISCOVERY_SPEC.md`, `docs/APPLICATIONS.md` Direction 1). Two tiny wire
+  hints were added in the last reserved payload space (flag bit 3
+  `LOOKING_TO_MEET` + byte-23 `interestBucket`), no version bump; the full
+  interest match is a backend lookup. Discovery is opt-in and OFF by default.
 - Cloud Anchors or UWB (these are the documented upgrade path, not the PoC)
 
 ---
@@ -75,8 +96,17 @@ degradation for free.
 **Constraint this imposes:** ~24 usable payload bytes, one-way, no
 acknowledgement. The payload spec in `docs/PAYLOAD_SPEC.md` is designed to fit.
 
-Advertising is set **non-connectable** (`setConnectable(false)`). This is not an
-oversight.
+Advertising is set **non-connectable** (`setConnectable(false)`) in the
+connectionless default. This is not an oversight.
+
+**Scope change (2026-08-15, owner request):** two paths now open a real GATT
+connection on top of the connectionless beacon — (1) the iPhone interop path, and
+(2) **Android↔Android messaging** (chat needs a connection; when two Androids bond,
+the lower-`peerId` one dials the other — `useBondEngine` → `ensureConnected`,
+`docs/GATT_MESSAGING_SPEC.md`). In interop mode the advertisement is **connectable**
+and carries the service UUID so a peer can dial the GATT server. The bond/beam
+itself stays connectionless and unchanged; the connection carries only the profile
++ message channels.
 
 ### 3.2 The alignment gate
 
@@ -95,6 +125,13 @@ proximity ping.
 must hold the device upright in portrait, roughly aligned with their body. This
 is acceptable — it's how you'd hold a phone to look through it anyway. Indoor
 magnetic interference degrades headings; see the accuracy fallback in §4.3.
+
+**Runtime toggle (2026-08-12, owner request):** the facing gate is now a runtime
+mode, not a fixed law. A HUD toggle (`proximityMode` in the store) switches
+between **PROXIMITY** (closeness alone forms the bond; `alignFloor` pinned to 1)
+and **FACE-TO-FACE** (this §3.2 ritual). Default is PROXIMITY for the testing
+phase until a concrete use-case fixes the choice. The alignment math and payload
+are unchanged — the toggle only sets the floor, so nothing downstream moved.
 
 ### 3.3 Identity lives in the payload, not the MAC address
 

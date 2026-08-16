@@ -1,0 +1,14 @@
+{
+  "//": "FULL app config. Requires the RN toolchain + node_modules installed (npm install). Checks the React Native, native-bridge, and Viro/AR layers. Run: npm run typecheck:app — on a dev machine, not in the pure-logic CI path.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2020", "DOM"],
+    "types": ["react"],
+    "allowJs": false,
+    "noEmit": true
+  },
+  "include": ["src", "index.js"],
+  "//exclude": "BridgeScene.tsx imports Viro, which is no longer a dependency (camera-overlay path). Kept in-repo for a future ARCore device.",
+  "exclude": ["node_modules", "**/*.test.ts", "**/*.test.tsx", "src/ar/BridgeScene.tsx"]
+}

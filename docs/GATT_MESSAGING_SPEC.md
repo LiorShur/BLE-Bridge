@@ -1,0 +1,233 @@
+# GATT messaging channel (Tier 2)
+
+Upgrade the connectionless beacon into a real device-to-device **data pipe** for
+messages and small structured data — chat, contact/profile exchange, small
+thumbnails — **cross-platform, no pairing, offline**, reusing the GATT stack the
+iOS interop path already established.
+
+This is the "tier 2" from the transport analysis: BLE advertising = discovery
+beacon (who's here); a **GATT connection** = the pipe you upgrade to when you want
+to exchange more than 24 bytes. Realistic ceiling: text/JSON instantly, small
+images (single-digit KB) in 1–4 s; NOT full photos/video (use a fat pipe or a
+backend relay for those — out of scope here).
+
+Status: **M0–M3 VALIDATED on hardware** (2026-08-13). Text chat confirmed working
+**both directions Android↔iPhone** on real devices. The pure layers (frame codec,
+reassembler, outbound queue, envelope, UTF-8) are unit-tested; the native
+characteristic, wrappers, central primitives, the `GattMessaging` orchestration,
+and the chat UI are live. Inbound messages notify (sound + a 💬 unread badge on the
+peer's chip) when the chat is closed.
+
+> **iOS build gotcha (fixed):** the first device test failed because Xcode was
+> compiling a stale duplicate `BlePeripheral.swift` (an old `NSObject` copy at the
+> shell's `ios/` root) instead of the `RCTEventEmitter` copy in `native/` — so the
+> message characteristic never got built. `scripts/ios-update.sh` now syncs every
+> duplicate copy Xcode might reference, not just `native/`.
+
+---
+
+## 1. Where it plugs in
+
+The Bridge GATT service already exists (`docs/GATT_SPEC.md`), with one
+characteristic:
+
+- `PAYLOAD_CHAR_UUID …7a91` — read + notify, value = the 24-byte advertisement
+  payload. Untouched by this feature.
+
+Messaging adds **one more characteristic on the same service**:
+
+- `MESSAGE_CHAR_UUID …7a92` — **write** (central→peripheral) + **notify**
+  (peripheral→central). One characteristic, bidirectional: the central writes
+  frames to it; the peripheral pushes frames back as notifications. No new
+  service, no new connection — it rides the connection the interop path already
+  opens.
+
+**MTU.** Right after connecting, request the largest ATT MTU the peer allows (up
+to 517). Usable per-frame bytes = `negotiatedMtu − 3` (ATT opcode + handle). We
+frame our own protocol inside that and never assume a specific MTU — the chunker
+takes the live value.
+
+This does extend CLAUDE.md §3.1 ("peers never connect"), but the interop path
+already crossed that line; messaging reuses the same connection rather than
+adding another. Flag it there when built.
+
+---
+
+## 2. The framing protocol (M1 — pure, `src/ble/gatt/messaging.ts`)
+
+A **message** (a chat string, a profile blob) is chunked into **frames** that each
+fit one MTU write/notify. The receiver reassembles by message id and acks.
+
+### 2.1 Frame layout (big-endian, 10-byte header)
+
+| Offset | Size | Field | Notes |
+|---:|---:|---|---|
+| 0 | 1 | `version` | `0x01`. Reject unknown. |
+| 1 | 1 | `type` | `1`=TEXT, `2`=PROFILE, `3`=ACK. |
+| 2 | 2 | `msgId` | uint16, identifies the message; wraps. |
+| 4 | 2 | `seq` | uint16, 0-based chunk index. |
+| 6 | 2 | `count` | uint16, total chunks in this message. |
+| 8 | 2 | `payloadLen` | uint16, payload bytes in THIS frame. |
+| 10 | … | `payload` | `payloadLen` bytes. |
+
+An **ACK** frame is header-only: `type=ACK`, `msgId=<completed id>`,
+`seq=0 count=0 payloadLen=0`. Sent once a message is fully received.
+
+### 2.2 Pure API
+
+```ts
+frameMessage(type, msgId, bytes, maxFrameBytes): Uint8Array[]   // chunk → frames
+encodeFrame(frame): Uint8Array
+decodeFrame(bytes): Frame | null                                // validates; null on bad
+ackFrame(msgId): Uint8Array
+
+class Reassembler {                        // one per peer connection
+  ingest(bytes): { message?: {type,msgId,bytes}, ack?: number } | null
+  sweep(now): void                         // drop partials older than a TTL
+}
+```
+
+- **Chunking:** `chunkPayload = maxFrameBytes − 10`. A 0-length message still
+  produces one frame (`count=1, seq=0, payloadLen=0`).
+- **Reassembly:** collect frames by `msgId`, dedupe by `seq`, tolerate
+  out-of-order; when all `count` chunks are present, concatenate in `seq` order,
+  emit `{message}` **and** `{ack: msgId}`. An incoming ACK frame emits `{ack}` with
+  no message.
+- **Bounded state:** cap in-flight messages and drop the oldest / stale (TTL via
+  `sweep`) so a dropped final chunk can't leak memory. Never throws on malformed
+  input — returns `null`, exactly like the payload codec.
+
+This layer is transport-agnostic and fully unit-tested off-device (round-trips,
+out-of-order, duplicates, truncation, MTU boundaries, oversized reassembly guard).
+
+### 2.3 Reliability
+
+Best-effort with app-level acks (the connection itself is reliable/ordered per
+GATT, but writes can fail and notifies can be missed under load):
+
+- Sender keeps a message "unacked" until it sees the ACK; retransmit all frames
+  after a timeout, up to N tries, then surface a failed-send.
+- Receiver acks on completion; a duplicate completed message (same msgId re-sent
+  because our ACK was lost) is de-duped and simply re-acked.
+
+---
+
+## 3. Message types
+
+- **TEXT** — UTF-8 string. The chat MVP.
+- **PROFILE** — a compact profile blob so **name + interests + headline (and,
+  budget permitting, a tiny thumbnail) transfer peer-to-peer with NO backend.**
+  This is the strategically interesting one: it deepens the serverless property —
+  today profiles need Firebase; over GATT they don't. v0 encoding: UTF-8 JSON
+  `{name, interests[], headline}` (thumbnail deferred — even a small one is 10–40
+  KB and wants compression + a size cap). The pure layer just moves bytes; the
+  profile encode/decode is a thin wrapper.
+- **ACK** — receipt (header-only).
+
+Types are a small enum so unknown types are ignored forward-compatibly.
+
+---
+
+## 4. Native wiring (M2 — not built)
+
+- **Kotlin GATT server** (`BleGattServerModule`): add `MESSAGE_CHAR_UUID` with
+  WRITE + NOTIFY, a CCC descriptor, `onCharacteristicWriteRequest` → hand bytes to
+  JS, and a `notifyMessage(base64)` method → `notifyCharacteristicChanged`.
+  Request a larger MTU on connect (`onMtuChanged` surfaces the value).
+- **Swift `BlePeripheral`**: add the characteristic with `.write` + `.notify`,
+  handle `didReceiveWrite`, and `updateValue` for outbound frames.
+- **`gattClient.ts` (central)**: after connect, negotiate MTU, subscribe to the
+  message characteristic (inbound notifies), and `writeCharacteristicWithResponse`
+  for outbound frames. Feed both directions through one `Reassembler` per peer.
+- **A small `GattMessaging` service** owns the per-peer Reassembler + the unacked
+  send queue + retransmit timers, exposing `send(peerId, type, bytes)` and an
+  `onMessage` callback. Decoupled from the signal engine.
+
+## 5. UI (M3 — not built)
+
+- A minimal chat surface reachable from a bonded peer's card / the Nearby sheet.
+- "Share profile" action that sends a PROFILE message; received profiles populate
+  the same `profiles` store cache the Firebase path uses (so the beam/cards show
+  them), tagged as peer-supplied.
+
+---
+
+## 6. Phasing
+
+- **M0 — spec.** ✅ this document.
+- **M1 — pure protocol.** ✅ `src/ble/gatt/messaging.ts` — frame codec, chunker,
+  Reassembler, acks; fully unit-tested off-device. No transport, no UI.
+- **M2 — native characteristic + client wiring.**
+  - ✅ Kotlin `BleGattServerModule`: MESSAGE char (write+notify), inbound-write →
+    `BleGattServer:message` event, `onMtuChanged` → `BleGattServer:mtu`, per-char
+    CCCD routing, `notifyMessage`.
+  - ✅ Swift `BlePeripheral` (now an `RCTEventEmitter`): MESSAGE char, `didReceiveWrite`
+    → `BlePeripheral:message`, notify-size on subscribe → `BlePeripheral:mtu`,
+    `notifyMessage`.
+  - ✅ TS wrappers (`gattServer.ts`, `iosPeripheral.ts`): `notifyMessage` + the
+    message/mtu event subscriptions.
+  - ✅ `gattClient.ts` central: `requestMTU(517)`, subscribe to the message
+    characteristic (`setMessageSink`), `writeMessageFrame`, `peerMtu`.
+  - ✅ `outbound.ts`: pure ack/retransmit `OutboundQueue`, unit-tested.
+  - ✅ **`GattMessaging` service** (`gattMessaging.ts`): per-channel `Reassembler`,
+    a global `OutboundQueue`, msgId allocation, a 4-byte sender-peerId **envelope**
+    (`messaging.ts`) so inbound frames identify their sender regardless of
+    transport, transport choice (central `writeMessageFrame` if we dialed the peer,
+    else peripheral `notifyMessage` broadcast), a retransmit tick, and ack/re-ack.
+    `gattClient` learns peerId↔deviceId (`deviceIdForPeer`) for routing.
+  - ✅ `utf8.ts`: a pure UTF-8 codec (Hermes lacks a reliable TextEncoder),
+    unit-tested against the platform encoder.
+- **M3 — chat UI + profile-over-GATT.** ✅ `features/chat/ChatSheet.tsx` — per-peer
+  history + composer, opened from a bonded peer's card; `store.sendChat` shows the
+  line optimistically and hands it to the transport; inbound text lands via
+  `useBondEngine`, notifying (sound + 💬 badge) when the chat is closed.
+  ✅ **Serverless profile-over-GATT** (`profileCodec.ts`, pure + tested): on bond,
+  `useBondEngine` sends my name/interests/headline as a PROFILE message (once per
+  peer per profile-version); the receiver applies it via `setPeerProfileFromGatt`,
+  which is authoritative — `useProfiles` won't let a Firebase result overwrite a
+  GATT-supplied profile. This gives peers your identity **with no backend**, and
+  fixes the iOS case where the Firebase JS SDK's anonymous auth fails to sign in.
+  ✅ **Photo-over-GATT**: a small 128px/q0.5 thumbnail (captured at pick time as
+  base64, ~4–8 KB) is sent as a **separate** PHOTO message so the tiny name
+  PROFILE still arrives instantly and the avatar fills in after. The receiver turns
+  the raw bytes into a `data:` URI.
+  **Flow control (multi-frame reliability).** A photo is dozens of frames, and the
+  first cut dropped them silently. The transport is now back-pressured end to end
+  (`gattMessaging.ts` serialized `drainLoop`):
+  - **Central → peripheral** frames use **write-WITHOUT-response**
+    (`gattClient.writeMessageFrame`). Write-WITH-response was tried for
+    flow-control but regressed Android→iPhone delivery on real hardware; since
+    photos now travel over Firebase, the flow-control benefit wasn't worth a broken
+    chat direction. Text is 1–2 frames and unaffected.
+  - **Peripheral → central** notifies read the native `updateValue` result — iOS
+    returns `false` when its TX queue is full (`notifyIosMessage` now propagates
+    it). A frame reported not-sent is **held and retried** (up to `MAX_FRAME_TRIES`)
+    instead of lost.
+  - The drain sends **one frame at a time, awaiting each**, and a retransmit never
+    piles a second copy on a send still in flight (`queuedMsgIds`). The retransmit
+    window is widened to 4 s so a multi-frame photo lands before its first retry.
+
+  A single-frame text/ack is unaffected. Android's peripheral notify can't surface
+  per-frame queue-full, but that path isn't on the Android↔iPhone photo route
+  (Android is always the central toward an iPhone).
+
+### Android↔Android messaging (2026-08-15, owner request)
+Messaging needs a GATT connection. It now works across **all** pairings, including
+**Android↔Android**: when two Androids bond, the **lower-`peerId`** side dials the
+other over GATT (`useBondEngine` → `gattClient.ensureConnected`), reusing the
+message characteristic both already host for the iPhone path. The higher-`peerId`
+side is the peripheral its GATT server already serves. Role tie-break guarantees
+exactly one connection. This reuses existing infra — both Androids already
+advertise **connectable + service UUID** in interop mode and run the GATT server;
+only the *wiring* (a dial for bonded Android peers) was missing.
+
+The connectionless bond/beam is **unchanged** — this is a separate link used only
+for the message channel, formed on bond and torn down when the peer goes stale.
+Cost: one managed GATT connection per bonded Android pair (reconnects on MAC
+rotation via the peerId-keyed `ensureConnected`, GATT-133 backoff, a little battery)
+— an accepted trade for cross-Android chat. This extends CLAUDE.md §3.1 the same
+way the iPhone interop path did.
+
+M1 is the whole hard, testable core — the part you cannot debug by looking at a
+phone — and lands first, exactly like `payload.ts` and the discovery brain did.
+```

@@ -1,0 +1,149 @@
+name: Android APK (Camera bridge)
+
+# Builds a standalone, sideloadable AuraBridge APK (debug-keystore-signed release
+# build, JS bundled — runs without a Metro server).
+#
+# Strategy: this repo holds the app source (src/, our Kotlin native module, our
+# AndroidManifest) but NOT the generated React Native Android shell (Gradle,
+# MainActivity/MainApplication, res/). CI generates a pristine RN 0.74.5 shell,
+# overlays our code, registers the native package, and builds — keeping the
+# version-specific Gradle project canonical instead of hand-authored.
+
+on:
+  push:
+    branches: ['claude/ble-bridge-docs-review-my9euw']
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # Caches the Gradle User Home — crucially including the wrapper
+      # distribution (~/.gradle/wrapper/dists) and downloaded dependencies. After
+      # the first successful run this restores gradle-8.6-all.zip from the Actions
+      # cache instead of re-fetching it, so a flaky 503 from the distribution host
+      # (which broke a build once) can't recur on cache hits, and builds are faster.
+      # cache-read-only:false lets this non-default branch populate the cache too.
+      - name: Set up Gradle (cache distribution + dependencies)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
+      - name: Pure-logic tests (payload codec + signal engine)
+        run: |
+          set -eux
+          npm install
+          npm test
+
+      - name: Generate RN 0.74.5 shell
+        run: |
+          set -eux
+          # Invoke the version-matched CLI DIRECTLY. `npx react-native@0.74.5 init`
+          # re-delegates to the latest CLI, which fails the template copy on Linux.
+          npx --yes @react-native-community/cli@13.6.9 init AuraBridge \
+            --version 0.74.5 --directory shell --skip-install --skip-git-init --pm npm
+          echo "----- shell/android java tree -----"
+          find shell/android/app/src/main/java -type f | sort
+
+      - name: Overlay app source onto the shell
+        run: |
+          set -eux
+          rm -f shell/App.tsx
+          rm -rf shell/__tests__
+          cp -R src shell/src
+          cp index.js app.json babel.config.js metro.config.js shell/
+          mkdir -p shell/android/app/src/main/java/com/aurabridge/ble
+          cp android/app/src/main/java/com/aurabridge/ble/*.kt \
+             shell/android/app/src/main/java/com/aurabridge/ble/
+          cp android/app/src/main/AndroidManifest.xml \
+             shell/android/app/src/main/AndroidManifest.xml
+
+      - name: Inject Firebase config from secrets
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+        run: |
+          set -eux
+          node scripts/gen-firebase-config.js shell/src/lib/firebaseConfig.ts
+
+      - name: Install deps + register native package
+        working-directory: shell
+        run: |
+          set -eux
+          npm install
+          npm install --save \
+            react-native-ble-plx@^3.2.1 \
+            zustand@^4.5.4 \
+            react-native-vision-camera@4.5.3 \
+            firebase@^10.12.0 \
+            @react-native-async-storage/async-storage@^1.23.1 \
+            react-native-image-picker@^7.1.2
+          # vision-camera needs minSdk 26 (also the project's floor) and Kotlin 1.9+.
+          perl -0pi -e 's/minSdkVersion = 23/minSdkVersion = 26/' android/build.gradle
+          perl -0pi -e 's/kotlinVersion = "[^"]*"/kotlinVersion = "1.9.24"/' android/build.gradle
+          echo "----- versions -----"; grep -nE 'minSdkVersion|kotlinVersion' android/build.gradle
+          MA=$(find android/app/src/main/java -name MainApplication.kt | head -n1)
+          test -n "$MA"  # fail loudly if the shell didn't generate it
+          perl -0pi -e 's/(PackageList\(this\)\.packages\.apply \{)/$1\n            add(com.aurabridge.ble.BleAdvertiserPackage())/' "$MA"
+          echo "----- $MA -----"
+          grep -n -A3 'packages.apply' "$MA"
+
+      - name: Accept Android SDK licenses (best effort)
+        run: yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+
+      - name: Gradle assembleRelease
+        working-directory: shell/android
+        run: |
+          set -ux
+          chmod +x ./gradlew
+          # Retry the build: on a cold cache the wrapper still fetches the Gradle
+          # distribution once, and that host has 503'd before. Three attempts with
+          # backoff turn a transient network flake into a slower green instead of a
+          # red run. A real compile error fails all three and still surfaces.
+          n=0
+          until [ "$n" -ge 3 ]; do
+            ./gradlew assembleRelease --no-daemon --stacktrace && exit 0
+            n=$((n + 1))
+            echo "Gradle attempt $n failed; retrying in $((n * 20))s (likely a transient download flake)…"
+            sleep $((n * 20))
+          done
+          echo "Gradle failed after 3 attempts."
+          exit 1
+
+      - name: Locate APK
+        id: apk
+        run: |
+          set -eux
+          APK=$(find shell/android/app/build/outputs/apk/release -name '*.apk' | head -n1)
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurabridge-stage2-apk
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
